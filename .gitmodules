@@ -1,0 +1,7 @@
+[submodule "pyorbbecsdk"]
+	path = camera/orbbec/pyorbbecsdk
+	url = https://github.com/orbbec/pyorbbecsdk.git
+
+[submodule "OrbbecSDK_ROS1"]
+	path = camera/orbbec/tests/orbbec_ros_docker/OrbbecSDK_ROS1
+	url = https://github.com/orbbec/OrbbecSDK_ROS1.git
