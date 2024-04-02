@@ -25,10 +25,26 @@ def get_camera_marker_tf(camera, marker):
     return transforms[0]
         
 def get_robot_camera_tf(camera, robot, marker, num_trials=None, verbose=True):
+    '''
+    Collects and solves for the transformation between the robot base and the camera
+    
+    Parameters:
+        camera: Camera object
+        robot: Robot object
+        marker: Marker object
+        num_trials: Number of trials to collect data
+    
+    Returns:
+        T_base2camera: Transformation matrix from robot base to camera    
+    
+    Note: 
+        T_a2b represents frame 'b' in frame 'a', or
+        tranforms a point from frame 'b' to frame 'a'
+    '''
     
     # 1. Initialize the robot, camera and marker
-    T_marker_camera_set = []
-    T_eef_base_set = []
+    T_camera2marker_set = []
+    T_base2eef_set = []
 
     # 2. Collect data
     if num_trials is None:
@@ -55,13 +71,13 @@ def get_robot_camera_tf(camera, robot, marker, num_trials=None, verbose=True):
             print("No markers found. Skipping this trial.")
             continue
         else:
-            T_marker_camera_set.append(transforms[0])
+            T_camera2marker_set.append(transforms[0])
             if verbose:
                 print(f"Marker pose in camera frame:\n {transforms[0]}")
             
             # 2.2. Collect data from robot
             gripper_pose = robot.get_eef_pose()
-            T_eef_base_set.append(gripper_pose)
+            T_base2eef_set.append(gripper_pose)
             if verbose:
                 print(f"Gripper pose in base frame:\n {gripper_pose}")
         
@@ -83,116 +99,158 @@ def get_robot_camera_tf(camera, robot, marker, num_trials=None, verbose=True):
     # 2.4. Save the data with data and timestamp for debugging
     print(datetime.now().strftime("%Y%m%d%H%M"))
     now = datetime.now().strftime("%Y%m%d%H%M")
-    np.save("T_marker_camera_set"+ now +".npy", T_marker_camera_set)
-    np.save("T_eef_base_set"+ now +".npy", T_eef_base_set)
+    np.save("T_camera2marker_set"+ now +".npy", T_camera2marker_set)
+    np.save("T_base2eef_set"+ now +".npy", T_base2eef_set)
     
     # 3. Solve for the transformation
     # 3.1. Solve the extrinsic calibration between the marker and the base
     
-    T_marker_eef = np.array([
-        [1.0, 0.0, 0.0, 0.0], 
-        [0.0, 1.0, 0.0, 0.0], 
-        [0.0, 0.0, 1.0, 0.0], 
-        [0.0, 0.0, 0.0, 1.0]
-    ])
+    T_eef2marker = np.array([
+                    [1.0, 0.0, 0.0, 0.0], 
+                    [0.0, 1.0, 0.0, 0.0], 
+                    [0.0, 0.0, 1.0, 0.0], 
+                    [0.0, 0.0, 0.0, 1.0]])
 
-    T_marker_base_set = [np.dot(T_marker_eef, T_eef_base) for T_eef_base in T_eef_base_set]
-
-    T_camera_base = solve_rigid_transformation(T_marker_base_set, T_marker_camera_set)
+    T_base2marker_set = [np.dot(T_base2eef, T_eef2marker) for T_base2eef in T_base2eef_set]
     
-    avg_error = calculate_reprojection_error(T_marker_base_set, T_eef_base_set, T_camera_base)
+    T_base2camera = solve_rigid_transformation(T_base2marker_set, T_camera2marker_set)
+    avg_error, std_error = calculate_reprojection_error(T_camera2marker_set, T_base2marker_set, T_base2camera)
     
-    print(f"Transformation matrix T:\n{T_camera_base}")
-    print(f"Avg. reprojection error: {avg_error}")
+    print(f"Transformation matrix T:\n{T_base2camera}")
+    print(f"Avg. reprojection error: {avg_error}, std. error: {std_error}")
     
     # 3.2. Save the calibration and error for debugging
     now = datetime.now().strftime("%Y%m%d%H%M")
-    np.save("T_camera_base_"+ now +".npy", T_camera_base)
+    np.save("T_camera_base_"+ now +".npy", T_base2camera)
     
-    return T_camera_base
-
-
-def solve_rigid_transformation(T_marker_base_set, T_marker_camera_set):
-    """
+    return T_base2camera
     
-    Calibration Options: (Reference links below) 
-    CALIB_HAND_EYE_TSAI
-    CALIB_HAND_EYE_PARK 
-    CALIB_HAND_EYE_HORAUD 
-    CALIB_HAND_EYE_ANDREFF 
-    CALIB_HAND_EYE_DANIILIDIS 
-    https://docs.opencv.org/4.x/d9/d0c/group__calib3d.html#gad10a5ef12ee3499a0774c7904a801b99
-    https://docs.opencv.org/4.x/d9/d0c/group__calib3d.html#gaebfc1c9f7434196a374c382abf43439b
-    """
-    
-    T_base_marker_set = [np.linalg.inv(T) for T in T_marker_base_set]
-    R_base2marker = [T[:3,:3] for T in T_base_marker_set]
-    t_base2marker = [T[:3,3] for T in T_base_marker_set]
-    
-    R_marker2camera = [T[:3,:3] for T in T_marker_camera_set]
-    t_marker2camera = [T[:3,3] for T in T_marker_camera_set]
-    
-    R_cam2base, t_cam2base = cv2.calibrateHandEye(R_base2marker, t_base2marker, 
-                                                  R_marker2camera, t_marker2camera, 
-                                                  method=cv2.CALIB_HAND_EYE_TSAI)
-
-    T = np.eye(4)
-    T[:3,:3] = R_cam2base    
-    T[:3,3] = np.squeeze(t_cam2base)
-    
-    return T
-
-    
-def calculate_reprojection_error(tag_poses, target_poses, T_matrix):
+def calculate_reprojection_error(T_a2t_set, T_b2t_set, T_a2b):
+    '''
+    Note: 
+    T_a2b represents frame 'b' in frame 'a', or
+    tranforms a point from frame 'b' to frame 'a'
+    '''
     errors = []
-    for tag_pose, target_pose in zip(tag_poses, target_poses):
-        # Transform target pose using T_matrix
-        transformed_target = np.dot(T_matrix, target_pose)
-        transformed_pos = transformed_target[:3, 3]
-
-        # Compare with tag pos
-        tag_pos = tag_pose[:3, 3]
-        error = np.linalg.norm(tag_pos - transformed_pos)
+    assert len(T_a2t_set) == len(T_b2t_set)
+    
+    # Calculate error using transformation projections
+    for i in range(len(T_b2t_set)):
+        T_a2t_calc = np.dot(T_a2b, T_b2t_set[i])
+        error = np.linalg.norm(T_a2t_set[i] - T_a2t_calc)
         errors.append(error)
-
+        
     # Compute average error
     avg_error = np.mean(errors)
-    return avg_error
+    std_error = np.std(errors)
+    return avg_error, std_error
 
-'''
-def solve_rigid_transformation(inpts, outpts):
+def solve_rigid_transformation(T_base2target_set, T_camera2target_set, method="SVD_ALGEBRAIC"):
     """
-    Takes in two sets of corresponding points, returns the rigid transformation matrix from the first to the second.
+    Solves for the rigid transformation between two sets of transformations
+    
+    Parameters:
+        T_base2target_set: List of transformation matrices from base to target
+        T_camera2target_set: List of transformation matrices from camera to target
+        method: Method to use for solving the transformation
+            * SVD_ALGEBRAIC: Algebraic method using SVD
+            * ONE_SAMPLE_ESTIMATE: One sample estimate
+            * CALIB_HAND_EYE_TSAI: Tsai's method using OpenCV library (T_base2target can be T_base2eef)
+            * CALIB_HAND_EYE_ANDREFF: Andreff's method using OpenCV library (T_base2target can be T_base2eef)
+            * CALIB_HAND_EYE_PARK: Park's method using OpenCV library (T_base2target can be T_base2eef)
+            
+    Returns:
+        T_base2camera: Transformation matrix from base to camera
+        
+    Note:
+        T_a2b represents frame 'b' in frame 'a', or
+        tranforms a point from frame 'b' to frame 'a'
     """
     
-    print("inpts: ", inpts)
-    print("outpts: ", outpts)
-    
-    assert inpts.shape == outpts.shape
-    inpts, outpts = np.copy(inpts), np.copy(outpts)
-    inpt_mean = inpts.mean(axis=0)
-    outpt_mean = outpts.mean(axis=0)
-    
-    outpts -= outpt_mean
-    inpts -= inpt_mean
-    
-    X = inpts.T
-    Y = outpts.T
-    covariance = np.dot(X, Y.T)
-    
-    U, s, V = np.linalg.svd(covariance)
-    S = np.diag(s)
-    assert np.allclose(covariance, np.dot(U, np.dot(S, V)))
-    V = V.T
-    idmatrix = np.identity(3)
-    idmatrix[2, 2] = np.linalg.det(np.dot(V, U.T))
-    
-    R = np.dot(np.dot(V, idmatrix), U.T)
-    t = outpt_mean.T - np.dot(R, inpt_mean)
-    
-    T = np.eye(4)
-    T[:3,:3] = R
-    T[:3,3] = t
-    
-    return T
-'''
+    match method:
+        case "SVD_ALGEBRAIC":   
+            t_camera2target = np.array([T[:3,3] for T in T_camera2target_set])
+            t_base2target = np.array([T[:3,3] for T in T_base2target_set])
+            
+            inpts = t_base2target
+            outpts = t_camera2target
+            
+            assert inpts.shape == outpts.shape
+            inpts, outpts = np.copy(inpts), np.copy(outpts)
+            inpt_mean = inpts.mean(axis=0)
+            outpt_mean = outpts.mean(axis=0)
+            outpts -= outpt_mean
+            inpts -= inpt_mean
+
+            X = inpts.T
+            Y = outpts.T
+
+            covariance = np.dot(X, Y.T)
+            U, s, V = np.linalg.svd(covariance)
+            S = np.diag(s)
+            
+            assert np.allclose(covariance, np.dot(U, np.dot(S, V)))
+            V = V.T
+            idmatrix = np.identity(3)
+            idmatrix[2, 2] = np.linalg.det(np.dot(V, U.T))
+            R = np.dot(np.dot(V, idmatrix), U.T)
+            t = outpt_mean.T - np.dot(R, inpt_mean)
+            T = np.eye(4)
+            T[:3,:3] = R
+            T[:3,3] = t
+            return T
+        
+        case "ONE_SAMPLE_ESTIMATE":
+            T_base2target = T_base2target_set[0]
+            T_camera2target = T_camera2target_set[0]
+            T_base2camera = np.dot(T_base2target, np.linalg.inv(T_camera2target))
+            return T_base2camera
+        
+        case "CALIB_HAND_EYE_TSAI":
+            T_target2base_set = [np.linalg.inv(T) for T in T_base2target_set]
+            R_target2base = [T[:3,:3] for T in T_target2base_set]
+            t_target2base = [T[:3,3] for T in T_target2base_set]
+            
+            R_camera2target = [T[:3,:3] for T in T_camera2target_set]
+            t_camera2target = [T[:3,3] for T in T_camera2target_set]
+            R_camera2base, T_base2camera = cv2.calibrateHandEye(R_target2base, t_target2base, 
+                                                                R_camera2target, t_camera2target,  
+                                                                cv2.CALIB_HAND_EYE_TSAI)
+            T_base2camera = np.eye(4)
+            T_base2camera[:3,:3] = R_camera2base
+            T_base2camera[:3,3] = np.squeeze(T_base2camera)
+            return T_base2camera
+        
+        case "CALIB_HAND_EYE_ANDREFF":
+            T_target2base_set = [np.linalg.inv(T) for T in T_base2target_set]
+            R_target2base = [T[:3,:3] for T in T_target2base_set]
+            t_target2base = [T[:3,3] for T in T_target2base_set]
+            
+            R_camera2target = [T[:3,:3] for T in T_camera2target_set]
+            t_camera2target = [T[:3,3] for T in T_camera2target_set]
+            R_camera2base, T_base2camera = cv2.calibrateHandEye(R_target2base, t_target2base, 
+                                                                R_camera2target, t_camera2target,  
+                                                                cv2.CALIB_HAND_EYE_ANDREFF)
+            T_base2camera = np.eye(4)
+            T_base2camera[:3,:3] = R_camera2base
+            T_base2camera[:3,3] = np.squeeze(T_base2camera)
+            return T_base2camera
+        
+        case "CALIB_HAND_EYE_PARK":
+            T_target2base_set = [np.linalg.inv(T) for T in T_base2target_set]
+            R_target2base = [T[:3,:3] for T in T_target2base_set]
+            t_target2base = [T[:3,3] for T in T_target2base_set]
+            
+            R_camera2target = [T[:3,:3] for T in T_camera2target_set]
+            t_camera2target = [T[:3,3] for T in T_camera2target_set]
+            R_camera2base, T_base2camera = cv2.calibrateHandEye(R_target2base, t_target2base, 
+                                                                R_camera2target, t_camera2target,  
+                                                                cv2.CALIB_HAND_EYE_PARK)
+            T_base2camera = np.eye(4)
+            T_base2camera[:3,:3] = R_camera2base
+            T_base2camera[:3,3] = np.squeeze(T_base2camera)
+            return T_base2camera        
+                
+        case _:
+            print("Invalid method. Aborting...")
+            return None
