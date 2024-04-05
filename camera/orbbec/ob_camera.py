@@ -22,6 +22,10 @@ class OBCamera:
         get_depth_intrinsics(): Returns the depth camera matrix.
         get_rgb_distortion(): Returns the rgb camera distortion coefficients.
         get_depth_distortion(): Returns the depth camera distortion coefficients. 
+    
+    Troubleshooting:
+
+        Using multiple cameras (e.g. nvram error) https://github.com/OpenKinect/libfreenect2/issues/807
     """
 
     # data members
@@ -96,7 +100,7 @@ class OBCamera:
         
         self.__pipeline.start(self.__config)
         self.camera_param = self.__pipeline.get_camera_param()
-        time.sleep(5) # wait for the camera to start
+        time.sleep(2) # wait for the camera to start
         print("Camera initialized: ", self.__sn)
         print("Camera Params: ", self.camera_param)
         self.get_frame()

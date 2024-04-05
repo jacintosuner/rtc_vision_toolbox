@@ -24,19 +24,19 @@ RUN . /opt/ros/$ROS_DISTRO/setup.sh \
  && rm -rf /var/lib/apt/lists/*
 
 RUN apt-get update
-RUN apt-get install -y udev
-RUN apt-get install libgflags-dev -y 
+#RUN apt-get install -y udev
+#RUN apt-get install libgflags-dev -y 
 RUN apt install ros-$ROS_DISTRO-image-geometry 
 RUN apt install ros-$ROS_DISTRO-camera-info-manager
 RUN apt install ros-$ROS_DISTRO-image-transport 
 RUN apt install ros-$ROS_DISTRO-image-publisher 
 RUN apt install libgoogle-glog-dev -y
-RUN apt install libusb-1.0-0-dev -y
+#RUN apt install libusb-1.0-0-dev -y
 RUN apt install libeigen3-dev -y
 
 # Build rosbridge packages.
 COPY OrbbecSDK_ROS1 $CATKIN_DIR/src/OrbbecSDK_ROS1
-COPY orbbec /orbbec
+COPY orbbec_ros /orbbec_ros
 RUN . /opt/ros/$ROS_DISTRO/setup.sh \
  && catkin_make
 

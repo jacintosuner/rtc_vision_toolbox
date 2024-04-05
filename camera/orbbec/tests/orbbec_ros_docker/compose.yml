@@ -9,8 +9,17 @@ services:
     network_mode: "host"
     privileged: true
     tty: true
+    ipc: host
+    pid: host
+    devices:
+      - /dev/dri:/dev/dri
     environment:
-      - "DISPLAY"
+      - "DISPLAY=$DISPLAY"
+      - "QT_X11_NO_MITSHM=1"
+      - "LIBGL_ALWAYS_SOFTWARE=1"
+      - "LIBGL_ALWAYS_INDIRECT="
     volumes:
-      - /tmp/.X11-unix:/tmp/.X11-unix
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+      - /dev/shm:/dev/shm
       - "./OrbbecSDK_ROS1/:/catkin_ws/src/OrbbecSDK_ROS1:ro"
+    restart: "unless-stopped"
