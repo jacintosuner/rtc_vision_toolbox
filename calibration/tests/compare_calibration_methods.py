@@ -1,6 +1,166 @@
 import numpy as np
 import cv2
 
+def test3():
+    '''
+    Generate 
+        (A) a random set of transformation matrices (robot_base to target) or T_base2target_set
+        (B) a random transformation matrix (robot_base to camera) or T_base2camera
+    and calculate
+        (C) a random set of transformation matrices (camera to target) or T_camera2target_set
+    
+    We use (A) and (C) above to test various approaches to calculate (B), the transformation matrix from robot_base to camera
+    
+    Assumption:
+        1. 3D space
+        2. target is on gripper, and T_gripper2target is identity matrix
+        
+    Note: 
+        T_a2b represents frame 'b' in frame 'a', or
+        tranforms a point from frame 'b' to frame 'a'
+    '''
+    print("Hello from test.py")
+    
+    SAMPLE_SIZE = 10
+    
+    # generate T_base2target_set
+    T_base2target_set = []
+    for i in range(SAMPLE_SIZE):
+        T = get_random_transformation_matrix()
+        T_base2target_set.append(T)
+    
+    # generate T_base2camera
+    T_base2camera = get_random_transformation_matrix()
+    print('T_base2camera=\n',T_base2camera)
+    
+    # calculate T_camera2target_set
+    T_camera2target_set = []
+    for i in range(SAMPLE_SIZE):
+        T = np.dot(np.linalg.inv(T_base2camera), T_base2target_set[i])
+        T_camera2target_set.append(T)
+        
+    # calculate T_base2camera using T_base2target_set and T_camera2target_set
+    T_base2camera_calculated = []
+    
+    # method 1: one shot calculation
+    T_base2camera_calculated = np.dot(T_base2target_set[0], np.linalg.inv(T_camera2target_set[0]))
+    avg_error, std_error = calculate_reprojection_error(T_base2target_set, T_camera2target_set, T_base2camera_calculated)
+    print(f"\nAvg. reprojection error (method 1a): {avg_error}, std. error: {std_error}")
+    print('T_base2camera_calculated (method 1a)=\n',T_base2camera_calculated)
+    T_base2camera_calculated = solve_rigid_transformation_new(T_base2target_set, T_camera2target_set, method="ONE_SAMPLE_ESTIMATE")
+    avg_error, std_error = calculate_reprojection_error(T_base2target_set, T_camera2target_set, T_base2camera_calculated)        
+    print(f"\nAvg. reprojection error (method 1b): {avg_error}, std. error: {std_error}")
+    print('T_base2camera_calculated (method 1b)=\n',T_base2camera_calculated)    
+    
+    # method 2: solve_rigid_transformation
+    t_camera2target = np.array([T[:3,3] for T in T_camera2target_set])
+    t_base2target = np.array([T[:3,3] for T in T_base2target_set])
+    T_base2camera_calculated = solve_rigid_transformation(t_camera2target, t_base2target)
+    avg_error, std_error = calculate_reprojection_error(T_base2target_set, T_camera2target_set, T_base2camera_calculated)        
+    print(f"\nAvg. reprojection error (method 2): {avg_error}, std. error: {std_error}")
+    print('T_base2camera_calculated (method 2)=\n',T_base2camera_calculated)
+    T_base2camera_calculated = solve_rigid_transformation_new(T_base2target_set, T_camera2target_set, method="SVD_ALGEBRAIC")
+    avg_error, std_error = calculate_reprojection_error(T_base2target_set, T_camera2target_set, T_base2camera_calculated)               
+    print(f"\nAvg. reprojection error (method 2b): {avg_error}, std. error: {std_error}")
+    print('T_base2camera_calculated (method 2b)=\n',T_base2camera_calculated) 
+    
+    # method 3: opencv library. 
+    # Details: https://docs.opencv.org/4.x/d9/d0c/group__calib3d.html#gaebfc1c9f7434196a374c382abf43439b
+    T_target2base_set = [np.linalg.inv(T) for T in T_base2target_set]
+    R_target2base = [T[:3,:3] for T in T_target2base_set]
+    t_target2base = [T[:3,3] for T in T_target2base_set]
+    
+    R_camera2target = [T[:3,:3] for T in T_camera2target_set]
+    t_camera2target = [T[:3,3] for T in T_camera2target_set]
+    
+    # CALIB_HAND_EYE_TSAI 
+    R_camera2base, T_base2camera = cv2.calibrateHandEye(R_target2base, t_target2base, 
+                                                        R_camera2target, t_camera2target,  
+                                                        cv2.CALIB_HAND_EYE_TSAI)
+    T_base2camera_calculated = np.eye(4)
+    T_base2camera_calculated[:3,:3] = R_camera2base
+    T_base2camera_calculated[:3,3] = np.squeeze(T_base2camera)
+    avg_error, std_error = calculate_reprojection_error(T_base2target_set, T_camera2target_set, T_base2camera_calculated)
+    print(f"\nAvg. reprojection error (method 3 TSAI): {avg_error}, std. error: {std_error}")    
+    print('T_base2camera_calculated (method 3 CALIB_HAND_EYE_TSAI )=\n',T_base2camera_calculated)
+    T_base2camera_calculated = solve_rigid_transformation_new(T_base2target_set, T_camera2target_set, method="CALIB_HAND_EYE_TSAI")
+    avg_error, std_error = calculate_reprojection_error(T_base2target_set, T_camera2target_set, T_base2camera_calculated)              
+    print(f"\nAvg. reprojection error (method 3b TSAI): {avg_error}, std. error: {std_error}")
+    print('T_base2camera_calculated (method 3b TSAI)=\n',T_base2camera_calculated) 
+
+
+def test2():
+    '''
+    Generate 
+        (A) a random set of transformation matrices (robot_base to target) or T_base2target_set
+        (B) a random transformation matrix (robot_base to camera) or T_base2camera
+    and calculate
+        (C) a random set of transformation matrices (camera to target) or T_camera2target_set
+    
+    We use (A) and (C) above to test various approaches to calculate (B), the transformation matrix from robot_base to camera
+    
+    Assumption:
+        1. 3D space
+        2. target is on gripper, and T_gripper2target is identity matrix
+        
+    Note: 
+        T_a2b represents frame 'b' in frame 'a', or
+        tranforms a point from frame 'b' to frame 'a'
+    '''
+    print("Hello from test2")
+    
+    SAMPLE_SIZE = 10
+    
+    # generate T_base2target_set
+    T_base2target_set = []
+    for i in range(SAMPLE_SIZE):
+        T = get_random_transformation_matrix()
+        T_base2target_set.append(T)
+    
+    # generate T_base2camera
+    T_base2camera = get_random_transformation_matrix()
+    print('T_base2camera=\n',T_base2camera)
+    
+    # calculate T_camera2target_set
+    T_camera2target_set = []
+    for i in range(SAMPLE_SIZE):
+        T = np.dot(np.linalg.inv(T_base2camera), T_base2target_set[i])
+        T_camera2target_set.append(T)
+        
+    # calculate T_base2camera using T_base2target_set and T_camera2target_set
+    T_base2camera_calculated = []
+    
+    # method 1: one shot calculation
+    T_base2camera_calculated = solve_rigid_transformation_new(T_base2target_set, T_camera2target_set, method="ONE_SAMPLE_ESTIMATE")
+    avg_error, std_error = calculate_reprojection_error(T_camera2target_set, T_base2target_set, T_base2camera_calculated)    
+    print(f"\nAvg. reprojection error (method 1): {avg_error}, std. error: {std_error}")
+    print('T_base2camera_calculated (method 1)=\n',T_base2camera_calculated)
+    
+    # method 2: solve_rigid_transformation
+    T_base2camera_calculated = solve_rigid_transformation_new(T_base2target_set, T_camera2target_set, method="SVD_ALGEBRAIC")
+    avg_error, std_error = calculate_reprojection_error(T_camera2target_set, T_base2target_set, T_base2camera_calculated)
+    print(f"\nAvg. reprojection error (method 2): {avg_error}, std. error: {std_error}")
+    print('T_base2camera_calculated (method 2)=\n',T_base2camera_calculated)
+    
+    # method 3: opencv library.     
+    # CALIB_HAND_EYE_TSAI 
+    T_base2camera_calculated = solve_rigid_transformation_new(T_base2target_set, T_camera2target_set, method="CALIB_HAND_EYE_TSAI")
+    avg_error, std_error = calculate_reprojection_error(T_camera2target_set, T_base2target_set, T_base2camera_calculated)
+    print(f"\nAvg. reprojection error (method 3 TSAI): {avg_error}, std. error: {std_error}")    
+    print('T_base2camera_calculated (method 3 CALIB_HAND_EYE_TSAI )=\n',T_base2camera_calculated)
+    
+    # CALIB_HAND_EYE_ANDREFF 
+    T_base2camera_calculated = solve_rigid_transformation_new(T_base2target_set, T_camera2target_set, method="CALIB_HAND_EYE_ANDREFF")
+    avg_error, std_error = calculate_reprojection_error(T_camera2target_set, T_base2target_set, T_base2camera_calculated)
+    print(f"\nAvg. reprojection error (method 3 ANDREFF): {avg_error}, std. error: {std_error}")
+    print('T_base2camera_calculated (method 3 CALIB_HAND_EYE_ANDREFF )=\n',T_base2camera_calculated)
+    
+    # CALIB_HAND_EYE_PARK  
+    T_base2camera_calculated = solve_rigid_transformation_new(T_base2target_set, T_camera2target_set, method="CALIB_HAND_EYE_PARK")
+    avg_error, std_error = calculate_reprojection_error(T_camera2target_set, T_base2target_set, T_base2camera_calculated)
+    print(f"\nAvg. reprojection error (method 3 PARK): {avg_error}, std. error: {std_error}")
+    print('T_base2camera_calculated (method 3 CALIB_HAND_EYE_PARK  )=\n',T_base2camera_calculated)
+
 def test():
     '''
     Generate 
@@ -51,8 +211,8 @@ def test():
     # method 2: solve_rigid_transformation
     t_camera2target = np.array([T[:3,3] for T in T_camera2target_set])
     t_base2target = np.array([T[:3,3] for T in T_base2target_set])
-    T_base2camera_calculated = solve_rigid_transformation(t_base2target, t_camera2target)
-    avg_error, std_error = calculate_reprojection_error(T_camera2target_set, T_base2target_set, T_base2camera_calculated)
+    T_base2camera_calculated = solve_rigid_transformation(t_camera2target, t_base2target)
+    avg_error, std_error = calculate_reprojection_error(T_base2target_set, T_camera2target_set, T_base2camera_calculated)
     print(f"\nAvg. reprojection error (method 2): {avg_error}, std. error: {std_error}")
     print('T_base2camera_calculated (method 2)=\n',T_base2camera_calculated)
     
@@ -147,6 +307,117 @@ def solve_rigid_transformation(inpts, outpts):
     T[:3,3] = t
     return T
 
+def solve_rigid_transformation_new(T_base2target_set, T_camera2target_set, method="ONE_SAMPLE_ESTIMATE"):
+    """
+    Solves for the rigid transformation between two sets of transformations
+    
+    Parameters:
+        T_base2target_set: List of transformation matrices from base to target
+        T_camera2target_set: List of transformation matrices from camera to target
+        method: Method to use for solving the transformation
+            * SVD_ALGEBRAIC: Algebraic method using SVD
+            * ONE_SAMPLE_ESTIMATE: One sample estimate
+            * CALIB_HAND_EYE_TSAI: Tsai's method using OpenCV library (T_base2target can be T_base2eef, error calc will be off though)
+            * CALIB_HAND_EYE_ANDREFF: Andreff's method using OpenCV library (T_base2target can be T_base2eef, error calc will be off though)
+            * CALIB_HAND_EYE_PARK: Park's method using OpenCV library (T_base2target can be T_base2eef, error calc will be off though)
+            
+    Returns:
+        T_base2camera: Transformation matrix from base to camera
+        
+    Note:
+        T_a2b represents frame 'b' in frame 'a', or
+        tranforms a point from frame 'b' to frame 'a'
+    """
+    
+    match method:
+        case "SVD_ALGEBRAIC":   
+            t_camera2target = np.array([T[:3,3] for T in T_camera2target_set])
+            t_base2target = np.array([T[:3,3] for T in T_base2target_set])
+            
+            inpts = t_camera2target
+            outpts = t_base2target
+            
+            assert inpts.shape == outpts.shape
+            inpts, outpts = np.copy(inpts), np.copy(outpts)
+            inpt_mean = inpts.mean(axis=0)
+            outpt_mean = outpts.mean(axis=0)
+            outpts -= outpt_mean
+            inpts -= inpt_mean
+
+            X = inpts.T
+            Y = outpts.T
+
+            covariance = np.dot(X, Y.T)
+            U, s, V = np.linalg.svd(covariance)
+            S = np.diag(s)
+            
+            assert np.allclose(covariance, np.dot(U, np.dot(S, V)))
+            V = V.T
+            idmatrix = np.identity(3)
+            idmatrix[2, 2] = np.linalg.det(np.dot(V, U.T))
+            R = np.dot(np.dot(V, idmatrix), U.T)
+            t = outpt_mean.T - np.dot(R, inpt_mean)
+            T = np.eye(4)
+            T[:3,:3] = R
+            T[:3,3] = t
+            return T
+        
+        case "ONE_SAMPLE_ESTIMATE":
+            T_base2target = T_base2target_set[0]
+            T_camera2target = T_camera2target_set[0]
+            T_base2camera = np.dot(T_base2target, np.linalg.inv(T_camera2target))
+            return T_base2camera
+        
+        case "CALIB_HAND_EYE_TSAI":
+            T_target2base_set = [np.linalg.inv(T) for T in T_base2target_set]
+            R_target2base = [T[:3,:3] for T in T_target2base_set]
+            t_target2base = [T[:3,3] for T in T_target2base_set]
+            
+            R_camera2target = [T[:3,:3] for T in T_camera2target_set]
+            t_camera2target = [T[:3,3] for T in T_camera2target_set]
+            R_camera2base, t_base2camera = cv2.calibrateHandEye(R_target2base, t_target2base, 
+                                                                R_camera2target, t_camera2target,  
+                                                                cv2.CALIB_HAND_EYE_TSAI)
+            T_base2camera = np.eye(4)
+            T_base2camera[:3,:3] = R_camera2base
+            T_base2camera[:3,3] = np.squeeze(t_base2camera)
+            return T_base2camera
+        
+        case "CALIB_HAND_EYE_ANDREFF":
+            T_target2base_set = [np.linalg.inv(T) for T in T_base2target_set]
+            R_target2base = [T[:3,:3] for T in T_target2base_set]
+            t_target2base = [T[:3,3] for T in T_target2base_set]
+            
+            R_camera2target = [T[:3,:3] for T in T_camera2target_set]
+            t_camera2target = [T[:3,3] for T in T_camera2target_set]
+            R_camera2base, t_base2camera = cv2.calibrateHandEye(R_target2base, t_target2base, 
+                                                                R_camera2target, t_camera2target,  
+                                                                cv2.CALIB_HAND_EYE_ANDREFF)
+            T_base2camera = np.eye(4)
+            T_base2camera[:3,:3] = R_camera2base
+            T_base2camera[:3,3] = np.squeeze(t_base2camera)
+            return T_base2camera
+        
+        case "CALIB_HAND_EYE_PARK":
+            T_target2base_set = [np.linalg.inv(T) for T in T_base2target_set]
+            R_target2base = [T[:3,:3] for T in T_target2base_set]
+            t_target2base = [T[:3,3] for T in T_target2base_set]
+            
+            R_camera2target = [T[:3,:3] for T in T_camera2target_set]
+            t_camera2target = [T[:3,3] for T in T_camera2target_set]
+            R_camera2base, t_base2camera = cv2.calibrateHandEye(R_target2base, t_target2base, 
+                                                                R_camera2target, t_camera2target,  
+                                                                cv2.CALIB_HAND_EYE_PARK)
+            T_base2camera = np.eye(4)
+            T_base2camera[:3,:3] = R_camera2base
+            T_base2camera[:3,3] = np.squeeze(t_base2camera)
+            return T_base2camera        
+                
+        case _:
+            print("Invalid method. Aborting...")
+            return None
+
+
 def calculate_reprojection_error(T_a2t_set, T_b2t_set, T_a2b):
     errors = []
     assert len(T_a2t_set) == len(T_b2t_set)
@@ -171,4 +442,4 @@ def calculate_reprojection_error(T_a2t_set, T_b2t_set, T_a2b):
     return avg_error, std_error
 
 if __name__ == "__main__":
-    test()
+    test3()

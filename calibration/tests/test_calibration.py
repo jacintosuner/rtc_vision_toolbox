@@ -10,7 +10,7 @@ from robot.ros_robot.ros_robot import ROSRobot
 '''
 
 def test_robot_camera_calibration():
-    camera = OBCamera(0)
+    camera = OBCamera(serial_no="CL8FC3100RL")
     
     print("=====================================")
     print("CAMERA INITIALIZED")
@@ -28,16 +28,16 @@ def test_robot_camera_calibration():
     print("ROBOT INITIALIZED")
     print("=====================================")
 
-    T_camera_robot = get_robot_camera_tf(camera, robot, marker)
+    T_robot2camera = get_robot_camera_tf(camera, robot, marker, 'PLAY')
     
     print("=====================================")
     print("RESULTS ARE HERE!!")
     print("=====================================")
     
-    print("T_camera_robot:\n", T_camera_robot)
+    print("T_robot2camera:\n", T_robot2camera)
 
 def test_camera_marker_calibration():
-    camera = OBCamera(2)
+    camera = OBCamera(serial_no="CL8FC3100W3")
     
     print("=====================================")
     print("CAMERA INITIALIZED")

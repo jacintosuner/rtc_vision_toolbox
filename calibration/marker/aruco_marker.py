@@ -54,13 +54,14 @@ class ArucoMarker:
             camera_matrix = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
         if camera_distortion is None:
             camera_distortion = np.zeros(5)
-        
+
+        rvecs, tvecs, _ = self.__estimatePoseSingleMarkers(corners, self.__size, camera_matrix, camera_distortion)
+
         if debug:
             output_image = input_image.copy()
             cv2.aruco.drawDetectedMarkers(output_image, corners, ids)
+            cv2.drawFrameAxes(output_image, camera_matrix, camera_distortion, rvecs, tvecs, self.__size)
             cv2.imwrite("debug.png", output_image)
-
-        rvecs, tvecs, _ = self.__estimatePoseSingleMarkers(corners, self.__size, camera_matrix, camera_distortion)
 
         Transforms = []
         
