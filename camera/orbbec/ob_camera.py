@@ -211,7 +211,39 @@ class OBCamera:
 
         return ir_image
 
-    def get_raw_depth_image(self, use_new_frame: bool=True):
+    def get_raw_depth_data(self, use_new_frame: bool=True):
+        """
+        Captures and returns a raw depth image from the camera.
+
+        Args:
+            use_new_frame (bool): If True, captures a new frame. If False, uses the latest frame.
+        
+        Returns:
+            depth_data (numpy.ndarray): Raw depth data (in mm) captured from the camera.
+        """
+        if use_new_frame:
+            frames = self.get_frame()
+        else:
+            frames = self.__latest_frameset
+        
+        if frames is None:
+            print("failed to get frames")
+            return None
+        depth_frame: VideoFrame = frames.get_depth_frame()
+        if depth_frame is None:
+            print("failed to get depth frame")
+            return None
+
+        width = depth_frame.get_width()
+        height = depth_frame.get_height()
+        scale = depth_frame.get_depth_scale()
+        depth_data = np.frombuffer(depth_frame.get_data(), dtype=np.uint16)
+        depth_data = depth_data.reshape((height, width))
+        depth_data = depth_data.astype(np.float32) * scale
+
+        return depth_data
+    
+    def get_depth_image(self, use_new_frame: bool=True):
         """
         Captures and returns a raw depth image from the camera.
 
@@ -243,6 +275,7 @@ class OBCamera:
 
         depth_image = cv2.normalize(depth_data, None, 0, 255, cv2.NORM_MINMAX,
                                     dtype=cv2.CV_8U)
+        
         return depth_image
 
     def get_colormap_depth_image(self, min_depth: int=20, max_depth: int=10000,
@@ -259,7 +292,7 @@ class OBCamera:
         Returns:
             depth_image (numpy.ndarray): Depth image with colormap applied.
         """
-        depth_image = self.get_raw_depth_image(use_new_frame=use_new_frame)
+        depth_image = self.get_depth_image(use_new_frame=use_new_frame)
         depth_image = np.where((depth_image > min_depth) & (depth_image < max_depth),
                                depth_image, 0)
         depth_image = cv2.applyColorMap(depth_image, colormap)
