@@ -1,6 +1,7 @@
 import cv2
 import cv2.aruco as aruco
 import numpy as np
+from autolab_core import Point, CameraIntrinsics, RigidTransform
 
 class ArucoMarker:
     """
@@ -32,7 +33,7 @@ class ArucoMarker:
         parameters = aruco.DetectorParameters()
         self.__detector = aruco.ArucoDetector(dictionary, parameters)
 
-    def get_center_poses(self, input_image, camera_matrix=None, camera_distortion=None, debug=False):
+    def get_center_poses(self, input_image, camera_matrix=None, camera_distortion=None, depth_image=None, debug=False):
         """
         Detects Aruco markers in the input image and estimates their center poses.
 
@@ -40,6 +41,7 @@ class ArucoMarker:
         - input_image (numpy.ndarray): Input image containing Aruco markers.
         - camera_matrix (numpy.ndarray): Camera matrix. Default is None.
         - camera_distortion (numpy.ndarray): Camera distortion coefficients. Default is None.
+        - depth_image (numpy.ndarray): Depth image. Default is None.
 
         Returns:
         - Transforms (list): List of transformation matrices representing the center poses of the detected markers.
@@ -60,9 +62,9 @@ class ArucoMarker:
         if debug:
             output_image = input_image.copy()
             cv2.aruco.drawDetectedMarkers(output_image, corners, ids)
-            cv2.drawFrameAxes(output_image, camera_matrix, camera_distortion, rvecs, tvecs, self.__size)
+            #cv2.drawFrameAxes(output_image, camera_matrix, camera_distortion, rvecs, tvecs, self.__size)
             cv2.imwrite("debug.png", output_image)
-
+            
         Transforms = []
         
         for i in range(len(ids)):
@@ -74,8 +76,53 @@ class ArucoMarker:
             transform_mat[:3, :3] = rmat
             transform_mat[:3, 3] = tvec.squeeze()
             Transforms.append(transform_mat)
-
+            
+        if depth_image is not None:
+            Transforms = self.__improve_marker_poses(Transforms, corners, depth_image, camera_matrix)
+            
         return Transforms, ids
+
+    def __improve_marker_poses(self, Transforms, corners, depth_image, camera_matrix):
+        """
+        Improves the marker poses by using depth information.
+
+        Parameters:
+        - Transforms (list): List of transformation matrices representing the center poses of the detected markers.
+        - corners (list): List of marker corners.
+        - depth_image (numpy.ndarray): Depth image.
+        - camera_matrix (numpy.ndarray): Camera matrix.
+
+        Returns:
+        - Transforms (list): List of improved transformation matrices.
+        """
+        fx = camera_matrix[0, 0]
+        fy = camera_matrix[1, 1]
+        cx = camera_matrix[0, 2]
+        cy = camera_matrix[1, 2]
+        intrinsics = CameraIntrinsics('cam',fx, fy, cx, cy)
+             
+        for i in range(len(Transforms)):
+            transform_mat = Transforms[i]
+            
+            corner = corners[i].squeeze()
+            corner = corner.reshape((4,2)).astype(int)
+            print(corner)
+
+            image_x = corner[:, 0].mean()
+            image_y = corner[:, 1].mean()
+            
+            object_center = Point(np.array([image_x, image_y]), 'cam')
+            object_depth = np.mean(depth_image[int(image_y)-1:int(image_y)+1, int(image_x)-1:int(image_x)+1])
+        
+            object_center = intrinsics.deproject_pixel(depth = object_depth, 
+                                                       pixel = object_center)
+            
+            # Update the translation vector
+            transform_mat[:3, 3] = object_center.data
+            Transforms[i] = transform_mat
+        
+        return Transforms
+            
 
     def __detect_markers(self, input_image):
         """

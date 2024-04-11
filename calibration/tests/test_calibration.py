@@ -37,7 +37,7 @@ def test_robot_camera_calibration():
     print("T_robot2camera:\n", T_robot2camera)
 
 def test_camera_marker_calibration():
-    camera = OBCamera(serial_no="CL8FC3100W3")
+    camera = OBCamera(serial_no="CL8FC3100RL")
     
     print("=====================================")
     print("CAMERA INITIALIZED")
@@ -58,5 +58,5 @@ def test_camera_marker_calibration():
     print("T_marker_camera:\n", T_marker_camera)    
 
 if __name__ == "__main__":
-    #test_camera_marker_calibration()
-    test_robot_camera_calibration()
+    test_camera_marker_calibration()
+    #test_robot_camera_calibration()

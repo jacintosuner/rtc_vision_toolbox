@@ -7,13 +7,26 @@ import cv2
 import time
 
 MIN_TRIALS = 3
-MAX_TRIALS = 10
+MAX_TRIALS = 50
 
 def get_camera_marker_tf(camera, marker):
     
     image = camera.get_rgb_image()
-    cv2.imwrite("test.png",image)
-    # image = camera.get_ir_image()
+    depth = camera.get_raw_depth_data(use_new_frame=False)
+    #convert depth data in mm to meters
+    depth = depth/1000.0
+        
+    '''
+    print("DISPLAY IMAGES")
+    import plotly.express as px
+    import plotly.graph_objects as go
+        
+    fig = px.imshow(depth)
+    fig.show()
+    
+    fig = px.imshow(image)
+    fig.show()
+    '''
     
     # get camera intrinsics
     camera_matrix = camera.get_rgb_intrinsics()
@@ -21,11 +34,27 @@ def get_camera_marker_tf(camera, marker):
     camera_distortion = camera.get_rgb_distortion()
     
     # get aruco marker poses w.r.t. camera
-    transforms, ids = marker.get_center_poses(image, camera_matrix, camera_distortion, debug=True)
+    transforms, ids = marker.get_center_poses(input_image = image, 
+                                              camera_matrix = camera_matrix, 
+                                              camera_distortion = camera_distortion, 
+                                              depth_image = depth, 
+                                              debug=True)
     
     # print the transformation
     for i in range(len(ids)):
-        print("Transform for id{}:\n {}".format(ids[i], transforms[i]))
+        print("Transform for id{} with depth image:\n {}".format(ids[i], transforms[i]))
+        
+    # get aruco marker poses w.r.t. camera
+    transforms, ids = marker.get_center_poses(input_image = image, 
+                                              camera_matrix = camera_matrix, 
+                                              camera_distortion = camera_distortion, 
+                                              depth_image = None, 
+                                              debug=True)
+    
+    # print the transformation
+    for i in range(len(ids)):
+        print("Transform for id{} without depth image:\n {}".format(ids[i], transforms[i]))
+    
         
     return transforms[0]
         
@@ -66,15 +95,14 @@ def get_robot_camera_tf(camera, robot, marker, method='JOG', num_trials=None, ve
 
     robot.move_to_pose(home_pos, home_quart)
 
-    for i in range(num_trials):
-        # Safety Check
-        go_on = input("Ensure the robot is in safe position. Do you want to continue? (y/n): ")
-        if(go_on != 'y'):
-            break
-        
+    # Safety Check
+    go_on = input("Ensure the robot is in safe position. Do you want to continue? (y/n): ")
+    if(go_on != 'y'):
+        return None
+
+    for i in range(num_trials):        
         retry = 'y'
-        
-        while retry!='n': 
+        while retry=='y': 
         
             match method:
                 # 2.1. Move the robot with controller and collect data
@@ -89,16 +117,21 @@ def get_robot_camera_tf(camera, robot, marker, method='JOG', num_trials=None, ve
                         
                 # 2.1. Move the robot and collect data
                 case 'PLAY':
-                    random_delta_pos = np.random.uniform(-0.08, 0.08, size=(3,))
-                    random_delta_quart = np.random.uniform(-0.001, 0.001, size=(4,))
+                    random_delta_pos = np.random.uniform(-0.05, 0.05, size=(3,))
+                    random_delta_quart = np.random.uniform(-0.3, 0.3, size=(4,))
                     robot.move_to_pose(position = home_pos + random_delta_pos, 
                                     orientation = home_quart + random_delta_quart)      
         
             # 2.2. Collect data from camera
             image = camera.get_rgb_image()
+            depth_data_mm = camera.get_raw_depth_data(use_new_frame=False)
+            depth_data = depth_data_mm/1000.0
             camera_matrix = camera.get_rgb_intrinsics()
             camera_distortion = camera.get_rgb_distortion()
-            transforms, ids = marker.get_center_poses(image, camera_matrix, camera_distortion)
+            transforms, ids = marker.get_center_poses(input_image = image, 
+                                                      camera_matrix = camera_matrix, 
+                                                      camera_distortion = camera_distortion,
+                                                      depth_image = depth_data)
             
             if ids is None:
                 print("No markers found. Skipping this trial.")
@@ -106,7 +139,7 @@ def get_robot_camera_tf(camera, robot, marker, method='JOG', num_trials=None, ve
                 if verbose:
                     print(f"Marker pose in camera frame:\n {transforms[0]}")
                     
-            retry = input("Retry? (y/n)") 
+            retry = input("Retry? (y/N)") 
         
         # 2.3. Collect data from robot
         gripper_pose = robot.get_eef_pose()
@@ -117,6 +150,8 @@ def get_robot_camera_tf(camera, robot, marker, method='JOG', num_trials=None, ve
         if(gripper_pose.shape == (4,4) and transforms[0].shape == (4,4)):
             T_base2eef_set.append(gripper_pose)
             T_camera2marker_set.append(transforms[0])
+        
+        print(f"---TRIAL {i+1} COMPLETED---.")
 
     # 2.5. Save the data with data and timestamp for debugging
     print(datetime.now().strftime("%Y%m%d%H%M"))
@@ -242,9 +277,16 @@ def solve_rigid_transformation(T_base2target_set, T_camera2target_set, method="O
             return T
         
         case "ONE_SAMPLE_ESTIMATE":
-            T_base2target = T_base2target_set[0]
-            T_camera2target = T_camera2target_set[0]
-            T_base2camera = np.dot(T_base2target, np.linalg.inv(T_camera2target))
+            T_base2camera_set = []
+            for i in range(len(T_base2target_set)):
+                T_base2target = T_base2target_set[0]
+                T_camera2target = T_camera2target_set[0]
+                T_base2camera = np.dot(T_base2target, np.linalg.inv(T_camera2target))
+                T_base2camera_set.append(T_base2camera)
+                error = calculate_reprojection_error(T_base2target_set, T_camera2target_set, T_base2camera)
+            
+            min_error_index = np.argmin(error)
+            T_base2camera = T_base2camera_set[min_error_index]
             return T_base2camera
         
         case "CALIB_HAND_EYE_TSAI":
