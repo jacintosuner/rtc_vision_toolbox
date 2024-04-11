@@ -65,8 +65,6 @@ class ROSRobot:
         '''
         #convert the data to a transformation 4x4 matrix
         
-        print('Received data:', data)
-        
         rotation = R.from_quat([data['rotation']['x'], data['rotation']['y'], data['rotation']['z'], data['rotation']['w']])
         rotation = rotation.as_matrix().astype(np.float64)
         translation = np.array([data['translation']['x'], data['translation']['y'], data['translation']['z']]).astype(np.float64)
@@ -92,13 +90,16 @@ class ROSRobot:
         #serialize pose and send to the service
         pose_serial = {'position': {'x': position[0], 'y': position[1], 'z': position[2]},
                        'orientation': {'x': orientation[0], 'y': orientation[1], 'z': orientation[2], 'w': orientation[3]}}
-         
-        request = roslibpy.ServiceRequest({'pose': pose_serial, 'base_frame': 'base_link'})
-        response = self.__move_to_pose_service.call(request)
-        print('Response:', response)
-        print('Response type:', type(response['pose']))
-        
-        return response['pose']
+        try:
+            request = roslibpy.ServiceRequest({'pose': pose_serial, 'base_frame': 'base_link'})
+            response = self.__move_to_pose_service.call(request)
+            print('Response:', response)
+            print('Response type:', type(response['pose']))
+            
+            return response['pose']
+        except Exception as e:
+            print('Try again. Error:', e)
+            return None
     
     def move_to_joints(self, joint_values):
         
