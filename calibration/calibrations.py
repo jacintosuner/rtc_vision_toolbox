@@ -278,14 +278,16 @@ def solve_rigid_transformation(T_base2target_set, T_camera2target_set, method="O
         
         case "ONE_SAMPLE_ESTIMATE":
             T_base2camera_set = []
+            errors = []
             for i in range(len(T_base2target_set)):
-                T_base2target = T_base2target_set[0]
-                T_camera2target = T_camera2target_set[0]
+                T_base2target = T_base2target_set[i]
+                T_camera2target = T_camera2target_set[i]
                 T_base2camera = np.dot(T_base2target, np.linalg.inv(T_camera2target))
                 T_base2camera_set.append(T_base2camera)
-                error = calculate_reprojection_error(T_base2target_set, T_camera2target_set, T_base2camera)
-            
-            min_error_index = np.argmin(error)
+                error, _ = calculate_reprojection_error(T_base2target_set, T_camera2target_set, T_base2camera)
+                errors.append(error)
+
+            min_error_index = np.argmin(errors)
             T_base2camera = T_base2camera_set[min_error_index]
             return T_base2camera
         
