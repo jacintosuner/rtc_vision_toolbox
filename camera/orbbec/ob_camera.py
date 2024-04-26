@@ -47,6 +47,7 @@ class OBCamera:
 
         # Choose the first camera if serial_no is None
         ctx = Context()
+        ctx.set_logger_level(OBLogLevel.ERROR)
         device_list = ctx.query_devices()
         if serial_no is None:
             if len(device_list) == 0:
