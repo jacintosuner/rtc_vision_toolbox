@@ -66,20 +66,20 @@ class OBCamera:
         
         # Initialize color stream profile
         profile_list = self.__pipeline.get_stream_profile_list(OBSensorType.COLOR_SENSOR)
-        #color_profile: VideoStreamProfile = profile_list.get_video_stream_profile(640, 0, OBFormat.RGB, 30)
-        color_profile: VideoStreamProfile = profile_list.get_default_video_stream_profile()
+        color_profile: VideoStreamProfile = profile_list.get_video_stream_profile(1280, 0, OBFormat.RGB, 15)
+        # color_profile: VideoStreamProfile = profile_list.get_default_video_stream_profile()
         self.__config.enable_stream(color_profile)
 
         # Initialize depth stream profile
         profile_list = self.__pipeline.get_stream_profile_list(OBSensorType.DEPTH_SENSOR)
-        #depth_profile: VideoStreamProfile = profile_list.get_video_stream_profile(640, 0, OBFormat.Y16, 30)
-        depth_profile: VideoStreamProfile = profile_list.get_default_video_stream_profile()
+        depth_profile: VideoStreamProfile = profile_list.get_video_stream_profile(1024, 0, OBFormat.Y16, 15)
+        # depth_profile: VideoStreamProfile = profile_list.get_default_video_stream_profile()
         self.__config.enable_stream(depth_profile)
 
         # Initialize ir stream profile
         profile_list = self.__pipeline.get_stream_profile_list(OBSensorType.IR_SENSOR)
-        #ir_profile: VideoStreamProfile = profile_list.get_video_stream_profile(640, 0, OBFormat.Y16, 30)
-        ir_profile: VideoStreamProfile = profile_list.get_default_video_stream_profile()
+        ir_profile: VideoStreamProfile = profile_list.get_video_stream_profile(1024, 0, OBFormat.Y16, 15)
+        # ir_profile: VideoStreamProfile = profile_list.get_default_video_stream_profile()
         self.__config.enable_stream(ir_profile)
         
         # Align the color and depth streams
@@ -325,6 +325,7 @@ class OBCamera:
             return None
         
         points = np.array(points)
+        print(f'Points shape: {points.shape}')
         new_points = []
         for point in points:
             if point[-1] < max_mm and point[-1] > min_mm:
