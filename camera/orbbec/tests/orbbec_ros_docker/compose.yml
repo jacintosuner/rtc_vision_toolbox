@@ -23,3 +23,6 @@ services:
       - /dev/shm:/dev/shm
       - "./OrbbecSDK_ROS1/:/catkin_ws/src/OrbbecSDK_ROS1:ro"
     restart: "unless-stopped"
+
+# Other References:
+# https://github.com/husarion/astra-docker

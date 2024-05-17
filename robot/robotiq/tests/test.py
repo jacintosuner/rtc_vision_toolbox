@@ -18,3 +18,6 @@ if True:
     grip.calibrate(0,40)
     grip.goTomm(20,255,255)
     grip.goTomm(40,1,255)
+    
+    input("Ready? Press Enter to continue...")
+    grip.closeGripper()

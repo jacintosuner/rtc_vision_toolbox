@@ -1,1 +1,0 @@
-export PYTHONPATH=$PYTHONPATH:$(pwd)/camera/orbbec/pyorbbecsdk/install/lib/

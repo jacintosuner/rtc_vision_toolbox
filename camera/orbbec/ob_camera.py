@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import open3d as o3d
 import time
+from datetime import datetime
 
 from typing import Union, Any, Optional
 
@@ -336,7 +337,9 @@ class OBCamera:
         pcd.points = o3d.utility.Vector3dVector(points)
         
         if(save_points):
-            points_filename = f"points_{depth_frame.get_timestamp()}.ply"
+            now = datetime.now().strftime("%m%d_%H%M")
+            points_filename = f"points_{now}.ply"
+            # points_filename = f"points_{depth_frame.get_timestamp()}.ply"
             o3d.io.write_point_cloud(points_filename, pcd)
         
         return pcd

@@ -117,6 +117,9 @@ class ArucoMarker:
             object_center = intrinsics.deproject_pixel(depth = object_depth, 
                                                        pixel = object_center)
             
+            print("Object center: ", object_center)
+            print("Object depth: ", object_depth)
+            
             # Update the translation vector
             transform_mat[:3, 3] = object_center.data
             Transforms[i] = transform_mat

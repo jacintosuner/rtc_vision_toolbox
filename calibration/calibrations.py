@@ -1,5 +1,6 @@
 import numpy as np
 from scipy.spatial.transform import Rotation as R
+import open3d as o3d
 
 from datetime import datetime
 #from autolab_core import RigidTransform
@@ -43,22 +44,10 @@ def get_camera_marker_tf(camera, marker):
     # print the transformation
     for i in range(len(ids)):
         print("Transform for id{} with depth image:\n {}".format(ids[i], transforms[i]))
-        
-    # get aruco marker poses w.r.t. camera
-    transforms, ids = marker.get_center_poses(input_image = image, 
-                                              camera_matrix = camera_matrix, 
-                                              camera_distortion = camera_distortion, 
-                                              depth_image = None, 
-                                              debug=True)
     
-    # print the transformation
-    for i in range(len(ids)):
-        print("Transform for id{} without depth image:\n {}".format(ids[i], transforms[i]))
-    
-        
     return transforms[0]
         
-def get_robot_camera_tf(camera, robot, marker, method='JOG', num_trials=None, verbose=True):
+def get_robot_camera_tf(camera, robot, marker, method='JOG', num_trials=None, verbose=True, use_depth=True):
     '''
     Collects and solves for the transformation between the robot base and the camera
     
@@ -119,28 +108,40 @@ def get_robot_camera_tf(camera, robot, marker, method='JOG', num_trials=None, ve
                 case 'PLAY':
                     random_delta_pos = np.random.uniform(-0.05, 0.05, size=(3,))
                     random_delta_quart = np.random.uniform(-0.3, 0.3, size=(4,))
-                    robot.move_to_pose(position = home_pos + random_delta_pos, 
-                                    orientation = home_quart + random_delta_quart)      
-        
-            # 2.2. Collect data from camera
-            image = camera.get_rgb_image()
-            depth_data_mm = camera.get_raw_depth_data(use_new_frame=False)
-            depth_data = depth_data_mm/1000.0
-            camera_matrix = camera.get_rgb_intrinsics()
-            camera_distortion = camera.get_rgb_distortion()
-            transforms, ids = marker.get_center_poses(input_image = image, 
-                                                      camera_matrix = camera_matrix, 
-                                                      camera_distortion = camera_distortion,
-                                                      depth_image = depth_data)
-            
-            if ids is None:
-                print("No markers found. Skipping this trial.")
+                    robot_pose = robot.move_to_pose(position = home_pos + random_delta_pos, 
+                                                    orientation = home_quart + random_delta_quart)      
+            if robot_pose is not None:
+                # 2.2. Collect data from camera
+                image = camera.get_rgb_image()
+                if use_depth:
+                    depth_data_mm = camera.get_raw_depth_data(use_new_frame=False)
+                    depth_data = depth_data_mm/1000.0
+                else:
+                    depth_data = None
+                camera_matrix = camera.get_rgb_intrinsics()
+                camera_distortion = camera.get_rgb_distortion()
+                transforms, ids = marker.get_center_poses(input_image = image, 
+                                                        camera_matrix = camera_matrix, 
+                                                        camera_distortion = camera_distortion,
+                                                        depth_image = depth_data)
+                
+                if ids is None:
+                    print("No markers found. Skipping this trial.")
+                    retry = 'y'
+                else:
+                    if verbose:
+                        print(f"Marker pose in camera frame:\n {transforms[0]}")
+                        #if transform has nan values, retry
+                    if np.isnan(transforms[0]).any():
+                        print("Nan values found. Retrying...")
+                        retry = 'y'
+                    else:
+                        time.sleep(1)
+                        retry = 'N'
+                        # retry = input("Retry? (y/N)")                 
             else:
-                if verbose:
-                    print(f"Marker pose in camera frame:\n {transforms[0]}")
-                    
-            retry = input("Retry? (y/N)") 
-        
+                retry = 'y'
+                        
         # 2.3. Collect data from robot
         gripper_pose = robot.get_eef_pose()
         if verbose:
@@ -203,6 +204,9 @@ def get_robot_camera_tf(camera, robot, marker, method='JOG', num_trials=None, ve
     
 def calculate_reprojection_error(T_a2t_set, T_b2t_set, T_a2b):
     '''
+    Example use:     
+    avg_error, std_error = calculate_reprojection_error(T_base2marker_set, T_camera2marker_set, T_base2camera)
+
     Note: 
     T_a2b represents frame 'b' in frame 'a', or
     tranforms a point from frame 'b' to frame 'a'
@@ -211,9 +215,16 @@ def calculate_reprojection_error(T_a2t_set, T_b2t_set, T_a2b):
     assert len(T_a2t_set) == len(T_b2t_set)
     
     # Calculate error using transformation projections
-    for i in range(len(T_b2t_set)):
-        T_a2t_calc = np.dot(T_a2b, T_b2t_set[i])
-        error = np.linalg.norm(T_a2t_set[i] - T_a2t_calc)
+    # for i in range(len(T_b2t_set)):
+    #     T_a2t_calc = np.dot(T_a2b, T_b2t_set[i])
+    #     error = np.linalg.norm(T_a2t_set[i] - T_a2t_calc)
+    #     errors.append(error)
+        
+    # Calculate error using pose projections
+    for i in range(len(T_a2t_set)):
+        pose_target_in_frame_b = T_b2t_set[i][:,3]
+        pose_target_in_frame_a = np.dot(T_a2b, pose_target_in_frame_b)
+        error = np.linalg.norm(T_a2t_set[i][:,3] - pose_target_in_frame_a)
         errors.append(error)
         
     # Compute average error
@@ -339,3 +350,74 @@ def solve_rigid_transformation(T_base2target_set, T_camera2target_set, method="O
         case _:
             print("Invalid method. Aborting...")
             return None
+
+# WIP
+'''def get_pcd_registration(source_pcd, target_pcd, method='ICP_P2P', verbose=True):
+    ###
+    Registers the source point cloud to the target point cloud.
+    * Assuming that the source point cloud is in the target frame.
+    * Use the method to fine-tune the transformation
+    
+    Parameters:
+        source_pcd [numpy.ndarray or open3d.geometry.PointCloud]: Source point cloud
+        target_pcd [numpy.ndarray or open3d.geometry.PointCloud]: Target point cloud
+        method: Method to use for registration
+            * ICP_P2Point: Iterative Closest Point with Point-to-Point correspondence
+            * ICP_P2Plane: Iterative Closest Point with Point-to-Plane correspondence
+    Returns:
+        T_target2source: Transformation matrix to transform point in source frame to target frame
+    
+    Note:
+        T_a2b represents frame 'b' in frame 'a', or
+        tranforms a point from frame 'b' to frame 'a'
+    ###
+    
+    # Convert numpy array to open3d point cloud
+    if isinstance(source_pcd, np.ndarray):
+        source_pcd = o3d.geometry.PointCloud()
+        source_pcd.points = o3d.utility.Vector3dVector(source_pcd)
+    
+    if isinstance(target_pcd, np.ndarray):
+        target_pcd = o3d.geometry.PointCloud()
+        target_pcd.points = o3d.utility.Vector3dVector(target_pcd)
+    
+    # Initial Evaluation
+    T_init = np.eye(4)
+    threshold = 0.02
+    evaluation = o3d.pipelines.registration.evaluate_registration(
+        source_pcd, target_pcd, threshold, T_init)
+    print("Initial evaluation:")
+    print(evaluation)
+    
+    # Registration
+    T_result = None
+    match method:
+        case "ICP_P2Point":
+            reg_p2p = o3d.pipelines.registration.registration_icp(
+                source_pcd, target_pcd, threshold, T_init,
+                o3d.pipelines.registration.TransformationEstimationPointToPoint())
+            T_result = reg_p2p.transformation
+            if verbose:
+                print(reg_p2p)
+                
+        case "ICP_P2Plane":
+            reg_p2p = o3d.pipelines.registration.registration_icp(
+                source_pcd, target_pcd, threshold, T_init,
+                o3d.pipelines.registration.TransformationEstimationPointToPlane())
+            T_result = reg_p2p.transformation
+            if verbose:
+                print(reg_p2p)
+                
+        case _:
+            print("Invalid method. Aborting...")
+            return None
+        
+    # Final Evaluation
+    evaluation = o3d.pipelines.registration.evaluate_registration(
+        source_pcd, target_pcd, threshold, T_result)
+    print("Final evaluation:")
+    print(evaluation)
+    
+    T_result = np.linalg.inv(T_result)
+    return T_result
+'''

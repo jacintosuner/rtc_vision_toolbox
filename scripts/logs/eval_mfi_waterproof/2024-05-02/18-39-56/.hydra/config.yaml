@@ -1,0 +1,114 @@
+log_dir: ${hydra:runtime.cwd}/logs
+output_dir: ${hydra:runtime.output_dir}
+job_type: eval_mfi_${task.name}
+lightning:
+  checkpoint_dir: ${output_dir}/checkpoints
+wandb:
+  entity: oadonca
+  project: rtc
+  group: waterproof_place
+  save_dir: ${output_dir}
+  artifact_dir: ${hydra:runtime.cwd}/wandb_artifacts
+policy_spec:
+  grasp_model: ${grasp_model}
+  place_model: ${place_model}
+checkpoints:
+  grasp: ${grasp_checkpoints.grasp}
+  place: ${place_checkpoints.place}
+num_trials: 100
+headless: true
+z_offset: 0.03
+object_class:
+  name: waterproof
+grasp_model:
+  encoder:
+    name: dgcnn
+  name: taxpose
+  pred_weight: true
+  emb_nn: dgcnn
+  emb_dims: 512
+  return_flow_component: false
+  center_feature: true
+  inital_sampling_ratio: 1
+  residual_on: true
+  multilaterate: false
+  mlat_sample: null
+  mlat_nkps: null
+  num_points: 1024
+  break_symmetry: false
+  pretraining: null
+place_model:
+  encoder:
+    name: dgcnn
+  name: taxpose
+  pred_weight: true
+  emb_nn: dgcnn
+  emb_dims: 512
+  return_flow_component: false
+  center_feature: true
+  inital_sampling_ratio: 1
+  residual_on: true
+  multilaterate: false
+  mlat_sample: null
+  mlat_nkps: null
+  num_points: 1024
+  break_symmetry: false
+  pretraining: null
+task:
+  name: waterproof
+grasp_task:
+  name: waterproof_grasp
+  action_name: gripper
+  anchor_name: waterproof
+  action_class: 2
+  anchor_class: 0
+  cloud_type: pre_grasp
+  softmax_temperature: 0.1
+  weight_normalize: softmax
+  checkpoint_file_action: ${hydra:runtime.cwd}/trained_models/pretraining_gripper_embnn_weights.ckpt
+  checkpoint_file_anchor: ${hydra:runtime.cwd}/trained_models/pretraining_mug_embnn_weights.ckpt
+place_task:
+  name: waterproof_place
+  action_class: 0
+  anchor_class: 1
+  cloud_type: teleport
+  softmax_temperature: 1
+  weight_normalize: l1
+  action_name: waterproof
+  anchor_name: nist_board
+  checkpoint_file_action: ${hydra:runtime.cwd}/trained_models/pretraining_mug_embnn_weights.ckpt
+  checkpoint_file_anchor: ${hydra:runtime.cwd}/trained_models/pretraining_rack_embnn_weights.ckpt
+grasp_checkpoints:
+  place: /home/mfi/repos/rtc_vision_toolbox/models/taxpose/logs/train_waterproof_waterproof_place/2024-05-02/15-11-12/checkpoints/last.ckpt
+  grasp: /home/mfi/repos/rtc_vision_toolbox/models/taxpose/logs/train_waterproof_waterproof_grasp/2024-05-02/15-25-47/checkpoints/last.ckpt
+place_checkpoints:
+  place: /home/mfi/repos/rtc_vision_toolbox/models/taxpose/logs/train_waterproof_waterproof_place/2024-05-02/15-11-12/checkpoints/last.ckpt
+  grasp: /home/mfi/repos/rtc_vision_toolbox/models/taxpose/logs/train_waterproof_waterproof_grasp/2024-05-02/15-25-47/checkpoints/last.ckpt
+dm:
+  train_dset:
+    demo_dset:
+      dataset_root: /home/mfi/repos/rtc_vision_toolbox/data/train_data/taxpose/nist_waterproof/place/train
+      min_num_points: 1024
+      synthetic_occlusion: false
+      occlusion_cfg:
+        plane_occlusion: true
+        ball_occlusion: false
+        downsample_type: fps
+        plane_standoff: 0.01
+    action_rot_sample_method: quat_uniform
+    anchor_rot_sample_method: random_flat_upright
+  val_dset:
+    demo_dset:
+      dataset_root: /home/mfi/repos/rtc_vision_toolbox/data/train_data/taxpose/nist_waterproof/place/test
+      min_num_points: 1024
+    action_rot_sample_method: quat_uniform
+    anchor_rot_sample_method: random_flat_upright
+  test_dset:
+    demo_dset:
+      dataset_root: /home/mfi/repos/rtc_vision_toolbox/data/train_data/taxpose/nist_waterproof/place/test
+      min_num_points: 1024
+    action_rot_sample_method: quat_uniform
+    anchor_rot_sample_method: random_flat_upright
+training:
+  batch_size: 6
+  max_epochs: 2000
