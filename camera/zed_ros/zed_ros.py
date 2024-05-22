@@ -31,7 +31,7 @@ class ZedRos:
         get_rgb_intrinsics(): Returns the camera matrix.
         get_depth_intrinsics(): Returns the depth camera matrix.
         get_rgb_distortion(): Returns the rgb camera distortion coefficients.
-        get_depth_distortion(): Returns the depth camera distortion coefficients. 
+        get_depth_distortion(): Returns the depth camera distortion coefficients.
     """
 
     # data members
@@ -174,7 +174,6 @@ class ZedRos:
 
         point_cloud = None
         if method == 'default':
-            # TODO
             point_cloud = self.__get_pointcloud_from_rostopic('/point_cloud/cloud_registered')
 
         elif method == 'igev':
@@ -427,6 +426,8 @@ class ZedRos:
     def __read_points(self, cloud, field_names=None, skip_nans=False, uvs=[]):
         """
         Read points from a L{sensor_msgs.PointCloud2} message.
+        Implementation based on code from:
+        https://github.com/ros/common_msgs/blob/20a833b56f9d7fd39655b8491a2ec1226d2639b3/sensor_msgs/src/sensor_msgs/point_cloud2.py#L61
 
         @param cloud: The point cloud to read from.
         @param field_names: The names of fields to read. If None, read all fields. [default: None]
@@ -522,15 +523,16 @@ class ZedRos:
                         offset += point_step
 
     def __estimate_depth_IGEV(self):
+        '''
+        Estimate depth using IGEV generated disparity map.
+        '''
         disparity = self.__estimate_disp_IGEV()
         unified_matrix = self.get_rgb_intrinsics()
         args = self.__get_default_IGEV_args()
         camera_seperation = args.camera_seperation
 
-        focal_length = unified_matrix[0][0] * 2.0 /3.0
-
-        if(disparity.shape[0] == 1080):
-            focal_length = unified_matrix[0][0]
+        # camera intrinsics are for 1080p, so we need to scale them to the current image size
+        focal_length = unified_matrix[0][0] * disparity.shape[0] / 1080
 
         depth = (camera_seperation * focal_length) / disparity
 
@@ -538,7 +540,7 @@ class ZedRos:
 
     def __estimate_disp_IGEV(self):
         """
-        Estimate depth using IGEV method.
+        Get disparity map using IGEV method.
         """
         left_image, right_image = self.__get_stereo_images()
 
@@ -592,7 +594,7 @@ class ZedRos:
     def __estimate_pcd_IGEV(self, min_mm: int = 40, max_mm: int = 10000, 
                             use_new_frame: bool=True) -> o3d.geometry.PointCloud:
         """
-        Estimate point cloud using IGEV method.
+        Estimate point cloud using IGEV generated disparity map.
         """
         igev_disp = self.__estimate_disp_IGEV()
         args = self.__get_default_IGEV_args()
@@ -601,7 +603,9 @@ class ZedRos:
         imageSize = (720, 1280)
         R = np.eye(3)
         T = np.array([-args.camera_seperation, 0, 0])
-        cameraMatrix = self.get_rgb_intrinsics()
+        
+        # camera intrinsics are for 1080p, so we need to scale them to the current image size        
+        cameraMatrix = self.get_rgb_intrinsics() * igev_disp.shape[0] / 1080
         distCoeffs = self.get_rgb_distortion()
         R1, R2, P1, P2, Q, validPixROI1, validPixROI2 = cv2.stereoRectify(cameraMatrix, distCoeffs, 
                                                                           cameraMatrix, distCoeffs, 
