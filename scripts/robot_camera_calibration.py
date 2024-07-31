@@ -16,9 +16,13 @@ def robot_camera_calibration(args):
     
     if args.cam_class is None:
         camera_class = input("Choose which class of camera. \n1:orbbec, \n2:zed_ros\n(1/2): ")
+    else: 
+        camera_class = args.cam_class
     if args.cam_id is None:
         camera_id = input("Choose which camera to use. \n0:cam0, \n1:cam1, \n2:cam2\n(0/1/2): ")
-    
+    else:
+        camera_id = args.cam_id
+        
     match camera_class:
         case "1":
             camera = OBCamera(serial_no=cam_key[f'cam{camera_id}'])

@@ -310,6 +310,8 @@ class LearnPlace:
             anchor_pcd.points = o3d.utility.Vector3dVector(
                 np.asarray(anchor_pcd.points)/1000.0)
 
+            np.save(os.path.join('/home/mfi/repos/rtc_vision_toolbox/test', f"demo{i+1}_action.npy"), np.asarray(action_pcd.points))
+
             # transform point cloud data
             anchor_pcd = anchor_pcd.transform(data_list[i]['anchor']['tf'])
             action_pcd = action_pcd.transform(data_list[i]['action']['tf'])

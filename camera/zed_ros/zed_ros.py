@@ -40,7 +40,7 @@ class ZedRos:
     __depth_mode    :str = None
     __camera_type   :str = None # 'zedx' or 'zedxm'
 
-    def __init__(self, camera_node: str, camera_type: str, rosmaster_ip='localhost', rosmaster_port=9090, depth_mode='default'):
+    def __init__(self, camera_node: str, camera_type: str, rosmaster_ip='localhost', rosmaster_port=9090, depth_mode='igev'):
         """
         Initializes the Camera object.
         """
@@ -81,11 +81,12 @@ class ZedRos:
 
         return color_image
 
-    def get_raw_depth_data(self, use_new_frame: bool=True, method=None):
+    def get_raw_depth_data(self, max_depth=None, use_new_frame: bool=True, method=None):
         """
         Captures and returns a raw depth image from the camera.
 
         Args:
+            max_depth (int): Maximum depth value to include in the colormap in mm
             TODO: use_new_frame (bool): If True, captures a new frame. If False, uses the latest frame.
         
         Returns:
@@ -112,14 +113,18 @@ class ZedRos:
         # convert meters to mm
         if method == 'igev':
             depth_data = depth_data * 1000
+            
+        if max_depth is not None:
+            depth_data = np.where(depth_data < max_depth, depth_data, None)
 
         return depth_data
 
-    def get_depth_image(self, use_new_frame: bool=True, method=None):
+    def get_depth_image(self, max_depth = None, use_new_frame: bool=True, method=None):
         """
         Captures and returns a raw depth image from the camera.
 
         Args:
+            max_depth (int): Maximum depth value to include in the colormap in mm
             TODO: use_new_frame (bool): If True, captures a new frame. If False, uses the latest frame.
         
         Returns:
@@ -129,7 +134,7 @@ class ZedRos:
         if method is None:
             method = self.__depth_mode
 
-        depth_data = self.get_raw_depth_data(method=method, use_new_frame=use_new_frame)
+        depth_data = self.get_raw_depth_data(max_depth=max_depth, method=method, use_new_frame=use_new_frame)
 
         depth_image = cv2.normalize(depth_data, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
 
@@ -342,7 +347,7 @@ class ZedRos:
 
         time_stamp_3 = time.time()
 
-        print(f"Time taken to get image: {time_stamp_3 - time_stamp_2}s, after {ctr} tries")
+        print(f"Time taken to get image: {time_stamp_3 - time_stamp_2}s")
 
         image_subscriber.unsubscribe()        
 
@@ -575,18 +580,29 @@ class ZedRos:
             image1, image2 = padder.pad(image1, image2)
             start = time.time()
 
-            igev_disp = model(image1, image2, iters=32, test_mode=True)
+            igev_disp, disp_prob = model(image1, image2, iters=32, test_mode=True)
             end = time.time()
             print("torch inference time: ", end - start)
             igev_disp = igev_disp.cpu().numpy()
             igev_disp = padder.unpad(igev_disp)
             igev_disp = igev_disp.squeeze()
-            print("igev_disp: ", igev_disp.shape)
-
-            igev_disp = np.float32( igev_disp )
-
+            disp_prob = disp_prob.cpu().numpy()
+            disp_prob = padder.unpad(disp_prob)
+            disp_prob = disp_prob.squeeze()
+            disp_prob = np.float32( disp_prob / 4 )
+            
+            igev_disp = np.float32( igev_disp )    
+            
+            # remove disparity values whose probability is less than 0.5
+            # igev_disp[disp_prob < 0.5] = 0
+            igev_disp[np.where(igev_disp == 0)] = None      
+            igev_disp[np.where(igev_disp == float('inf'))] = None
+            
+            np.save("disp_prob.npy", disp_prob)
+            
             print("::::::IGEV estimation finished::::::")
             
+            print("disp_prob: ", disp_prob.shape)
             print("IGEV disp shape: ", igev_disp.shape)
 
             return igev_disp
@@ -610,7 +626,6 @@ class ZedRos:
         R1, R2, P1, P2, Q, validPixROI1, validPixROI2 = cv2.stereoRectify(cameraMatrix, distCoeffs, 
                                                                           cameraMatrix, distCoeffs, 
                                                                           imageSize, R, T)
-
         with torch.no_grad():
             # rgb point cloud, reference : https://gist.github.com/lucasw/ea04dcd65bc944daea07612314d114bb
             disp = igev_disp
@@ -624,13 +639,16 @@ class ZedRos:
                     z = image_3d[i][j][2]*1000
                     pt = [x, y, z]
                     points.append(pt)
-            print("finished")   
 
             points = np.array(points)
             new_points = []
             for point in points:
                 if point[-1] < max_mm and point[-1] > min_mm:
                     new_points.append(point)
+                    
+            if len(new_points) == 0:
+                new_points = points
+            
             points = np.array(new_points)
             pcd = o3d.geometry.PointCloud()
             pcd.points = o3d.utility.Vector3dVector(points)
@@ -646,48 +664,80 @@ class ZedRos:
         # GET RIGHT AND LEFT IMAGES
         left_image = stereo_image[:, :int(stereo_image.shape[1]/2)]
         right_image = stereo_image[:, int(stereo_image.shape[1]/2):]
+        
+        if stereo_image is None:
+            raise Exception('Stereo image not found. Please check the ROS topic name.')
 
         return left_image, right_image
 
     def __get_default_IGEV_args(self):
-        parser = argparse.ArgumentParser()
-        # parser.add_argument('--restore_ckpt', help="restore checkpoint", default='./pretrained_models/sceneflow/sceneflow.pth')
-        parser.add_argument('--restore_ckpt', help="restore checkpoint", default='/home/mfi/repos/rtc_vision_toolbox/camera/zed_ros/IGEV/IGEV-Stereo/pretrained_models/middlebury/middlebury.pth')
-        # parser.add_argument('--restore_ckpt', help="restore checkpoint", default='./pretrained_models/eth3d/eth3d.pth')
+        # parser = argparse.ArgumentParser()
+        # # parser.add_argument('--restore_ckpt', help="restore checkpoint", default='./pretrained_models/sceneflow/sceneflow.pth')
+        # parser.add_argument('--restore_ckpt', help="restore checkpoint", default='/home/mfi/repos/rtc_vision_toolbox/camera/zed_ros/IGEV/IGEV-Stereo/pretrained_models/middlebury/middlebury.pth')
+        # # parser.add_argument('--restore_ckpt', help="restore checkpoint", default='./pretrained_models/eth3d/eth3d.pth')
 
-        parser.add_argument('--save_numpy', action='store_true', help='save output as numpy arrays')
+        # parser.add_argument('--save_numpy', action='store_true', help='save output as numpy arrays')
 
-        parser.add_argument('-l', '--left_imgs', help="path to all first (left) frames", default="./demo-imgs/*/im0.png")
-        parser.add_argument('-r', '--right_imgs', help="path to all second (right) frames", default="./demo-imgs/*/im1.png")
+        # parser.add_argument('-l', '--left_imgs', help="path to all first (left) frames", default="./demo-imgs/*/im0.png")
+        # parser.add_argument('-r', '--right_imgs', help="path to all second (right) frames", default="./demo-imgs/*/im1.png")
 
-        parser.add_argument('--output_directory', help="directory to save output", default="./demo-output/")
-        parser.add_argument('--mixed_precision', action='store_true', help='use mixed precision')
-        parser.add_argument('--valid_iters', type=int, default=32, help='number of flow-field updates during forward pass')
+        # parser.add_argument('--output_directory', help="directory to save output", default="./demo-output/")
+        # parser.add_argument('--mixed_precision', action='store_true', help='use mixed precision')
+        # parser.add_argument('--valid_iters', type=int, default=32, help='number of flow-field updates during forward pass')
 
-        # Architecture choices
-        parser.add_argument('--hidden_dims', nargs='+', type=int, default=[128]*3, help="hidden state and context dimensions")
-        parser.add_argument('--corr_implementation', choices=["reg", "alt", "reg_cuda", "alt_cuda"], default="reg", help="correlation volume implementation")
-        parser.add_argument('--shared_backbone', action='store_true', help="use a single backbone for the context and feature encoders")
-        parser.add_argument('--corr_levels', type=int, default=2, help="number of levels in the correlation pyramid")
-        parser.add_argument('--corr_radius', type=int, default=4, help="width of the correlation pyramid")
-        parser.add_argument('--n_downsample', type=int, default=2, help="resolution of the disparity field (1/2^K)")
-        parser.add_argument('--slow_fast_gru', action='store_true', help="iterate the low-res GRUs more frequently")
-        parser.add_argument('--n_gru_layers', type=int, default=3, help="number of hidden GRU levels")
-        parser.add_argument('--max_disp', type=int, default=192, help="max disp of geometry encoding volume")
+        # # Architecture choices
+        # parser.add_argument('--hidden_dims', nargs='+', type=int, default=[128]*3, help="hidden state and context dimensions")
+        # parser.add_argument('--corr_implementation', choices=["reg", "alt", "reg_cuda", "alt_cuda"], default="reg", help="correlation volume implementation")
+        # parser.add_argument('--shared_backbone', action='store_true', help="use a single backbone for the context and feature encoders")
+        # parser.add_argument('--corr_levels', type=int, default=2, help="number of levels in the correlation pyramid")
+        # parser.add_argument('--corr_radius', type=int, default=4, help="width of the correlation pyramid")
+        # parser.add_argument('--n_downsample', type=int, default=2, help="resolution of the disparity field (1/2^K)")
+        # parser.add_argument('--slow_fast_gru', action='store_true', help="iterate the low-res GRUs more frequently")
+        # parser.add_argument('--n_gru_layers', type=int, default=3, help="number of hidden GRU levels")
+        # parser.add_argument('--max_disp', type=int, default=192, help="max disp of geometry encoding volume")
 
-        parser.add_argument('--left_topic', type=str, default="/zedB/zed_node_B/left/image_rect_color", help="left cam topic")
-        parser.add_argument('--right_topic', type=str, default="/zedB/zed_node_B/right/image_rect_color", help="right cam topic")
-        parser.add_argument('--depth_topic', type=str, default="/zedB/zed_node_B/depth/depth_registered", help="depth cam topic")
-        parser.add_argument('--conf_map_topic', type=str, default="/zedB/zed_node_B/confidence/confidence_map", help="depth confidence map topic")
+        # parser.add_argument('--left_topic', type=str, default="/zedB/zed_node_B/left/image_rect_color", help="left cam topic")
+        # parser.add_argument('--right_topic', type=str, default="/zedB/zed_node_B/right/image_rect_color", help="right cam topic")
+        # parser.add_argument('--depth_topic', type=str, default="/zedB/zed_node_B/depth/depth_registered", help="depth cam topic")
+        # parser.add_argument('--conf_map_topic', type=str, default="/zedB/zed_node_B/confidence/confidence_map", help="depth confidence map topic")
 
+        # # parser.add_argument('--downsampling', type=bool, default=False, help="downsampling image dimension")
         # parser.add_argument('--downsampling', type=bool, default=False, help="downsampling image dimension")
-        parser.add_argument('--downsampling', type=bool, default=False, help="downsampling image dimension")
 
-        if(self.__camera_type == 'zedx'):
-            parser.add_argument('--camera_seperation', type=float, default=0.12, help="camera seperation")
-        elif(self.__camera_type == 'zedxm'):
-            parser.add_argument('--camera_seperation', type=float, default=0.063, help="camera seperation")
+        # if(self.__camera_type == 'zedx'):
+        #     parser.add_argument('--camera_seperation', type=float, default=0.12, help="camera seperation")
+        # elif(self.__camera_type == 'zedxm'):
+        #     parser.add_argument('--camera_seperation', type=float, default=0.050, help="camera seperation")
 
-        args = parser.parse_args()
+        # args = parser.parse_args()
+        
+        class args:
+            restore_ckpt = '/home/mfi/repos/rtc_vision_toolbox/camera/zed_ros/IGEV/IGEV-Stereo/pretrained_models/middlebury/middlebury.pth'
+            save_numpy = False
+            left_imgs = "./demo-imgs/*/im0.png"
+            right_imgs = "./demo-imgs/*/im1.png"
+            output_directory = "./demo-output/"
+            mixed_precision = False
+            valid_iters = 32
+            hidden_dims = [128]*3
+            corr_implementation = "reg"
+            shared_backbone = False
+            corr_levels = 2
+            corr_radius = 4
+            n_downsample = 2
+            slow_fast_gru = False
+            n_gru_layers = 3
+            max_disp = 192
+            left_topic = "/zedB/zed_node_B/left/image_rect_color"
+            right_topic = "/zedB/zed_node_B/right/image_rect_color"
+            depth_topic = "/zedB/zed_node_B/depth/depth_registered"
+            conf_map_topic = "/zedB/zed_node_B/confidence/confidence_map"
+            downsampling = False
+            camera_seperation = 0.12
+            
+        if self.__camera_type == 'zedxm':
+            args.camera_seperation = 0.050
+        elif self.__camera_type == 'zedx':
+            args.camera_seperation = 0.12
 
         return args

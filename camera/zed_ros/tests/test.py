@@ -65,7 +65,7 @@ def test5(camera):
 # TEST6: GET IGEV POINT CLOUD. WORKS OK ✓
 def test6(camera):
     print("Getting point cloud using IGEV method")
-    point_cloud = camera.get_point_cloud(method="igev", save_points=True)
+    point_cloud = camera.get_point_cloud(method="igev", save_points=True, max_mm = 2000)
     print("Point cloud shape: ", np.asarray(point_cloud.points).shape)
 
 
@@ -74,6 +74,7 @@ if __name__ == "__main__":
     print("Testing ZedRos class")
 
     cam_id = input("Enter camera id (0/1/2): ")
+    cam_id = int(cam_id)
     if cam_id == 2:
         camera = ZedRos(
             camera_node=f"/cam{cam_id}/zed_cam{cam_id}", camera_type="zedxm"

@@ -213,11 +213,12 @@ class OBCamera:
 
         return ir_image
 
-    def get_raw_depth_data(self, use_new_frame: bool=True):
+    def get_raw_depth_data(self, max_depth = None, use_new_frame: bool=True):
         """
         Captures and returns a raw depth image from the camera.
 
         Args:
+            max_depth (int): Maximum depth value to include in the depth data in mm.
             use_new_frame (bool): If True, captures a new frame. If False, uses the latest frame.
         
         Returns:
@@ -242,10 +243,13 @@ class OBCamera:
         depth_data = np.frombuffer(depth_frame.get_data(), dtype=np.uint16)
         depth_data = depth_data.reshape((height, width))
         depth_data = depth_data.astype(np.float32) * scale
+        
+        if max_depth is not None:
+            depth_data = np.where(depth_data < max_depth, depth_data, None)
 
         return depth_data
     
-    def get_depth_image(self, use_new_frame: bool=True):
+    def get_depth_image(self, max_depth = None, use_new_frame: bool=True):
         """
         Captures and returns a raw depth image from the camera.
 
@@ -274,6 +278,9 @@ class OBCamera:
         depth_data = np.frombuffer(depth_frame.get_data(), dtype=np.uint16)
         depth_data = depth_data.reshape((height, width))
         depth_data = depth_data.astype(np.float32) * scale
+        
+        if max_depth is not None:
+            depth_data = np.where(depth_data < max_depth, depth_data, None)
 
         depth_image = cv2.normalize(depth_data, None, 0, 255, cv2.NORM_MINMAX,
                                     dtype=cv2.CV_8U)
@@ -301,7 +308,7 @@ class OBCamera:
 
         return depth_image
     
-    def get_point_cloud(self, min_mm: int = 400, max_mm: int = 1000, 
+    def get_point_cloud(self, min_mm: int = 10, max_mm: int = 10000, 
                         save_points: bool=False, use_new_frame: bool=True) -> o3d.geometry.PointCloud:
         """
         Captures and returns a point cloud from the camera.

@@ -55,7 +55,12 @@ def get_robot_camera_tf(camera, robot, marker, method='JOG', num_trials=None, ve
         camera: Camera object
         robot: Robot object
         marker: Marker object
+        method: Method to collect data
+            * JOG: Manually move the robot
+            * PLAY: Randomly move the robot
         num_trials: Number of trials to collect data
+        verbose: Print debug information
+        use_depth: Use depth data for calibration
     
     Returns:
         T_base2camera: Transformation matrix from robot base to camera    
@@ -70,89 +75,7 @@ def get_robot_camera_tf(camera, robot, marker, method='JOG', num_trials=None, ve
     T_base2eef_set = []
 
     # 2. Collect data
-    if num_trials is None:
-        num_trials = int(input("Enter the number of trials: "))
-
-    if num_trials < MIN_TRIALS or num_trials > MAX_TRIALS:
-        print("Invalid number of trials. Aborting...")
-        return
-        
-    home = robot.get_eef_pose()
-    home_pos = np.squeeze(home[:3,3])
-    home_rot = home[:3,:3]
-    home_quart = R.from_matrix(home_rot).as_quat()
-
-    robot.move_to_pose(home_pos, home_quart)
-
-    # Safety Check
-    go_on = input("Ensure the robot is in safe position. Do you want to continue? (y/n): ")
-    if(go_on != 'y'):
-        return None
-
-    for i in range(num_trials):        
-        retry = 'y'
-        while retry=='y': 
-        
-            match method:
-                # 2.1. Move the robot with controller and collect data
-                case 'JOG':
-                    good_to_go = 'n'
-                    while good_to_go != 'y':
-                        if i == num_trials - 1:
-                            good_to_go = 'y'
-                        else:
-                            good_to_go = input("Jog the robot. Done? (y/n): ")
-                            
-                        
-                # 2.1. Move the robot and collect data
-                case 'PLAY':
-                    random_delta_pos = np.random.uniform(-0.05, 0.05, size=(3,))
-                    random_delta_quart = np.random.uniform(-0.3, 0.3, size=(4,))
-                    robot_pose = robot.move_to_pose(position = home_pos + random_delta_pos, 
-                                                    orientation = home_quart + random_delta_quart)      
-            if robot_pose is not None:
-                # 2.2. Collect data from camera
-                image = camera.get_rgb_image()
-                if use_depth:
-                    depth_data_mm = camera.get_raw_depth_data(use_new_frame=False)
-                    depth_data = depth_data_mm/1000.0
-                else:
-                    depth_data = None
-                camera_matrix = camera.get_rgb_intrinsics()
-                camera_distortion = camera.get_rgb_distortion()
-                transforms, ids = marker.get_center_poses(input_image = image, 
-                                                        camera_matrix = camera_matrix, 
-                                                        camera_distortion = camera_distortion,
-                                                        depth_image = depth_data)
-                
-                if ids is None:
-                    print("No markers found. Skipping this trial.")
-                    retry = 'y'
-                else:
-                    if verbose:
-                        print(f"Marker pose in camera frame:\n {transforms[0]}")
-                        #if transform has nan values, retry
-                    if np.isnan(transforms[0]).any():
-                        print("Nan values found. Retrying...")
-                        retry = 'y'
-                    else:
-                        time.sleep(1)
-                        retry = 'N'
-                        # retry = input("Retry? (y/N)")                 
-            else:
-                retry = 'y'
-                        
-        # 2.3. Collect data from robot
-        gripper_pose = robot.get_eef_pose()
-        if verbose:
-            print(f"Gripper pose in base frame:\n {gripper_pose}")        
-            
-        # 2.4. Append data if valid
-        if(gripper_pose.shape == (4,4) and transforms[0].shape == (4,4)):
-            T_base2eef_set.append(gripper_pose)
-            T_camera2marker_set.append(transforms[0])
-        
-        print(f"---TRIAL {i+1} COMPLETED---.")
+    T_base2eef_set, T_camera2marker_set = collect_data(camera, robot, marker, method, num_trials, verbose, use_depth)
 
     # 2.5. Save the data with data and timestamp for debugging
     print(datetime.now().strftime("%Y%m%d%H%M"))
@@ -163,40 +86,41 @@ def get_robot_camera_tf(camera, robot, marker, method='JOG', num_trials=None, ve
     # 3. Solve for the transformation
     # 3.1. Solve the extrinsic calibration between the marker and the base
     
-    # TODO: Change this to the actual transformation between the end-effector and the marker
+    """
     T_eef2marker = np.array([
                     [1.0, 0.0, 0.0, 0.1016], 
                     [0.0, 1.0, 0.0, 0.0], 
                     [0.0, 0.0, 1.0, 0.049], 
                     [0.0, 0.0, 0.0, 1.0]])
+    """
+
+    T_eef2marker = np.array(
+        [
+            [0.0, 0.0, 1.0, 0.041502],
+            [-1.0, 0.0, 0.0, 0.0],
+            [0.0, -1.0, 0.0, 0.080824],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
 
     T_base2marker_set = [np.dot(T_base2eef, T_eef2marker) for T_base2eef in T_base2eef_set]
     
-    print("\nMETHOD1: ONE_SAMPLE_ESTIMATE")
-    T_base2camera = solve_rigid_transformation(T_base2marker_set, T_camera2marker_set, method="ONE_SAMPLE_ESTIMATE")
-    avg_error, std_error = calculate_reprojection_error(T_camera2marker_set, T_base2marker_set, T_base2camera)
-    print(f"Transformation matrix T_base2camera:\n{T_base2camera}")
-    print(f"Avg. reprojection error: {avg_error}, std. error: {std_error}")
-
-    print("\nMETHOD2: SVD_ALGEBRAIC")
-    T_base2camera = solve_rigid_transformation(T_base2marker_set, T_camera2marker_set, method="SVD_ALGEBRAIC")
-    avg_error, std_error = calculate_reprojection_error(T_camera2marker_set, T_base2marker_set, T_base2camera)
-    print(f"Transformation matrix T_base2camera:\n{T_base2camera}")
-    print(f"Avg. reprojection error: {avg_error}, std. error: {std_error}")
+    T_base2camera_set = []
+    avg_error_set = []
     
-    print("\nMETHOD3: CALIB_HAND_EYE_TSAI")
-    T_base2camera = solve_rigid_transformation(T_base2marker_set, T_camera2marker_set, method="CALIB_HAND_EYE_TSAI")
-    avg_error, std_error = calculate_reprojection_error(T_camera2marker_set, T_base2marker_set, T_base2camera)
-    print(f"Transformation matrix T_base2camera:\n{T_base2camera}")
-    print(f"Avg. reprojection error: {avg_error}, std. error: {std_error}")
+    methods = ["ONE_SAMPLE_ESTIMATE", "SVD_ALGEBRAIC", "CALIB_HAND_EYE_TSAI", "CALIB_HAND_EYE_ANDREFF"]
     
-    print("\nMETHOD4: CALIB_HAND_EYE_ANDREFF")
-    T_base2camera = solve_rigid_transformation(T_base2marker_set, T_camera2marker_set, method="CALIB_HAND_EYE_ANDREFF")
-    avg_error, std_error = calculate_reprojection_error(T_camera2marker_set, T_base2marker_set, T_base2camera)
-    print(f"Transformation matrix T_base2camera:\n{T_base2camera}")
-    print(f"Avg. reprojection error: {avg_error}, std. error: {std_error}")
-    
-    # 3.2. Save the calibration and error for debugging
+    for method in methods:
+        print(f"\nMETHOD: {method}")
+        T_base2camera = solve_rigid_transformation(T_base2marker_set, T_camera2marker_set, method=method)
+        avg_error, std_error = calculate_reprojection_error(T_base2marker_set, T_camera2marker_set, T_base2camera)
+        T_base2camera_set.append(T_base2camera)
+        avg_error_set.append(avg_error)
+        print(f"Transformation matrix T_base2camera:\n{T_base2camera}")
+        print(f"Avg. reprojection error: {avg_error}, std. error: {std_error}")
+        
+    # 3.2. Save the best calibration and error for debugging
+    T_base2camera = T_base2camera_set[np.argmin(avg_error_set)]
     now = datetime.now().strftime("%Y%m%d%H%M")
     np.save("T_base2camera_"+ now +".npy", T_base2camera)
     
@@ -350,6 +274,113 @@ def solve_rigid_transformation(T_base2target_set, T_camera2target_set, method="O
         case _:
             print("Invalid method. Aborting...")
             return None
+
+def collect_data(camera, robot, marker, method='JOG', num_trials=None, verbose=True, use_depth=True):
+    '''
+    Collects data for robot-camera calibration
+    
+    Parameters:
+        camera: Camera object
+        robot: Robot object
+        marker: Marker object
+        method: Method to collect data
+            * JOG: Manually move the robot
+            * PLAY: Randomly move the robot
+        num_trials: Number of trials to collect data
+        verbose: Print debug information
+        use_depth: Use depth data for calibration
+    '''
+    
+    T_camera2marker_set = []
+    T_base2eef_set = []
+    
+    if num_trials is None:
+        num_trials = int(input("Enter the number of trials: "))
+
+    if num_trials < MIN_TRIALS or num_trials > MAX_TRIALS:
+        print("Invalid number of trials. Aborting...")
+        return
+        
+    home = robot.get_eef_pose()
+    home_pos = np.squeeze(home[:3,3])
+    home_rot = home[:3,:3]
+    home_quart = R.from_matrix(home_rot).as_quat()
+
+    robot.move_to_pose(home_pos, home_quart)
+
+    # Safety Check
+    go_on = input("Ensure the robot is in safe position. Do you want to continue? (y/n): ")
+    if(go_on != 'y'):
+        return None
+
+    for i in range(num_trials):        
+        retry = 'y'
+        while retry=='y': 
+        
+            match method:
+                # 2.1. Move the robot with controller and collect data
+                case 'JOG':
+                    good_to_go = 'n'
+                    while good_to_go != 'y':
+                        if i == num_trials - 1:
+                            good_to_go = 'y'
+                        else:
+                            good_to_go = input("Jog the robot. Done? (y/n): ")
+                            
+                        
+                # 2.1. Move the robot and collect data
+                case 'PLAY':
+                    random_delta_pos = np.random.uniform(-0.05, 0.05, size=(3,))
+                    # random_delta_quart = np.random.uniform(-0.3, 0.3, size=(4,))
+                    random_delta_quart = np.random.uniform(-0.1, 0.1, size=(4,))                    
+                    robot_pose = robot.move_to_pose(position = home_pos + random_delta_pos, 
+                                                    orientation = home_quart + random_delta_quart)      
+            if robot_pose is not None:
+                # 2.2. Collect data from camera
+                image = camera.get_rgb_image()
+                if use_depth:
+                    depth_data_mm = camera.get_raw_depth_data(use_new_frame=False)
+                    depth_data = depth_data_mm/1000.0
+                else:
+                    depth_data = None
+                camera_matrix = camera.get_rgb_intrinsics()
+                camera_distortion = camera.get_rgb_distortion()
+                transforms, ids = marker.get_center_poses(input_image = image, 
+                                                        camera_matrix = camera_matrix, 
+                                                        camera_distortion = camera_distortion,
+                                                        depth_image = depth_data)
+                
+                if ids is None:
+                    print("No markers found. Skipping this trial.")
+                    retry = 'y'
+                else:
+                    if verbose:
+                        print(f"Marker pose in camera frame:\n {transforms[0]}")
+                        #if transform has nan values, retry
+                    if np.isnan(transforms[0]).any():
+                        print("Nan values found. Retrying...")
+                        retry = 'y'
+                    else:
+                        time.sleep(1)
+                        retry = 'N'
+                        # retry = input("Retry? (y/N)")                 
+            else:
+                retry = 'y'
+                        
+        # 2.3. Collect data from robot
+        gripper_pose = robot.get_eef_pose()
+        if verbose:
+            print(f"Gripper pose in base frame:\n {gripper_pose}")        
+            
+        # 2.4. Append data if valid
+        if(gripper_pose.shape == (4,4) and transforms[0].shape == (4,4)):
+            T_base2eef_set.append(gripper_pose)
+            T_camera2marker_set.append(transforms[0])
+        
+        print(f"---TRIAL {i+1} COMPLETED---.")
+    
+    return T_base2eef_set, T_camera2marker_set
+
 
 # WIP
 '''def get_pcd_registration(source_pcd, target_pcd, method='ICP_P2P', verbose=True):

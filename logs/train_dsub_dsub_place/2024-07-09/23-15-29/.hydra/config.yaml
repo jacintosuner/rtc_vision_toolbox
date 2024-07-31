@@ -1,0 +1,323 @@
+job_type: train_${task.name}_${task.phase.name}
+data_root: ${oc.env:HOME}/datasets
+model:
+  encoder:
+    name: dgcnn
+  name: taxpose
+  pred_weight: true
+  emb_nn: dgcnn
+  emb_dims: 512
+  return_flow_component: false
+  center_feature: true
+  inital_sampling_ratio: 1
+  residual_on: true
+  multilaterate: false
+  mlat_sample: null
+  mlat_nkps: null
+  num_points: 1024
+  break_symmetry: true
+  pretraining: null
+benchmark:
+  name: mfi
+  dataset_root: ${..data_root}/mfi
+task:
+  name: dsub
+  phase:
+    name: dsub_place
+    action_class: 0
+    anchor_class: 1
+    cloud_type: teleport
+    softmax_temperature: 1
+    weight_normalize: l1
+    action_name: dsub
+    anchor_name: nist_board
+    checkpoint_file_action: ${hydra:runtime.cwd}/trained_models/pretraining_mug_embnn_weights.ckpt
+    checkpoint_file_anchor: ${hydra:runtime.cwd}/trained_models/pretraining_rack_embnn_weights.ckpt
+dm:
+  train_dset:
+    demo_dset:
+      occlusion_cfg:
+        action_plane_occlusion: false
+        action_plane_standoff: 0.04
+        action_ball_occlusion: true
+        action_ball_radius: 0.04
+        anchor_plane_occlusion: false
+        anchor_plane_standoff: 0.04
+        anchor_ball_occlusion: true
+        anchor_ball_radius: 0.1
+        occlusion_class: 0
+        occlusion_prob: 0.5
+        downsample_type: 2N_random_fps
+      dataset_type: ${benchmark.name}
+      dataset_root: /home/mfi/repos/rtc_vision_toolbox/data/demonstrations/06-27-dsub/learn_data/train
+      dataset_indices: null
+      num_demo: 10
+      min_num_points: 2048
+      cloud_type: ${task.phase.cloud_type}
+      action_class: ${task.phase.action_class}
+      anchor_class: ${task.phase.anchor_class}
+      min_num_cameras: 4
+      max_num_cameras: 4
+      normalize_dist: true
+      object_type: ${task.name}
+      action: ${task.phase.name}
+      symmetry_after_transform: false
+      synthetic_occlusion: true
+      distractor_anchor_aug: false
+      distractor_rot_sample_method: axis_angle_uniform_z
+      multimodal_transform_base: false
+    num_points: 1024
+    rotation_variance: 3.141592653589793
+    translation_variance: 1.0
+    action_rot_sample_method: quat_uniform
+    anchor_rot_sample_method: random_flat_upright
+    dataset_size: 1000
+    angle_degree: 180
+    synthetic_occlusion: true
+    plane_occlusion: true
+    plane_standoff: 0.04
+    ball_occlusion: true
+    ball_radius: 0.1
+    occlusion_class: 0
+    symmetric_class: null
+    overfit: false
+    num_overfit_transforms: 3
+    gripper_lr_label: false
+    testing_symmetry: false
+  val_dset:
+    demo_dset:
+      occlusion_cfg:
+        action_plane_occlusion: false
+        action_plane_standoff: 0.04
+        action_ball_occlusion: false
+        action_ball_radius: 0.1
+        anchor_plane_occlusion: false
+        anchor_plane_standoff: 0.04
+        anchor_ball_occlusion: false
+        anchor_ball_radius: 0.1
+        occlusion_class: 0
+        occlusion_prob: 0.5
+        downsample_type: fps
+      dataset_type: ${benchmark.name}
+      dataset_root: /home/mfi/repos/rtc_vision_toolbox/data/demonstrations/06-27-dsub/learn_data/test
+      dataset_indices: null
+      num_demo: null
+      min_num_points: 2048
+      cloud_type: ${...train_dset.demo_dset.cloud_type}
+      action_class: ${...train_dset.demo_dset.action_class}
+      anchor_class: ${...train_dset.demo_dset.anchor_class}
+      min_num_cameras: ${...train_dset.demo_dset.min_num_cameras}
+      max_num_cameras: ${...train_dset.demo_dset.max_num_cameras}
+      normalize_dist: ${...train_dset.demo_dset.normalize_dist}
+      object_type: ${task.name}
+      action: ${task.phase.name}
+      symmetry_after_transform: ${...train_dset.demo_dset.symmetry_after_transform}
+      synthetic_occlusion: false
+      distractor_anchor_aug: ${...train_dset.demo_dset.distractor_anchor_aug}
+      distractor_rot_sample_method: ${...train_dset.demo_dset.distractor_rot_sample_method}
+      multimodal_transform_base: ${...train_dset.demo_dset.multimodal_transform_base}
+    num_points: ${..train_dset.num_points}
+    rotation_variance: ${..train_dset.rotation_variance}
+    translation_variance: ${..train_dset.translation_variance}
+    action_rot_sample_method: quat_uniform
+    anchor_rot_sample_method: random_flat_upright
+    dataset_size: ${..train_dset.dataset_size}
+    angle_degree: ${..train_dset.angle_degree}
+    synthetic_occlusion: ${..train_dset.synthetic_occlusion}
+    ball_radius: ${..train_dset.ball_radius}
+    plane_occlusion: ${..train_dset.plane_occlusion}
+    ball_occlusion: ${..train_dset.ball_occlusion}
+    plane_standoff: ${..train_dset.plane_standoff}
+    occlusion_class: ${..train_dset.occlusion_class}
+    symmetric_class: ${..train_dset.symmetric_class}
+    overfit: ${..train_dset.overfit}
+    num_overfit_transforms: ${..train_dset.num_overfit_transforms}
+    gripper_lr_label: ${..train_dset.gripper_lr_label}
+    testing_symmetry: ${..train_dset.testing_symmetry}
+  test_dset:
+    demo_dset:
+      occlusion_cfg:
+        action_plane_occlusion: false
+        action_plane_standoff: 0.04
+        action_ball_occlusion: false
+        action_ball_radius: 0.1
+        anchor_plane_occlusion: false
+        anchor_plane_standoff: 0.04
+        anchor_ball_occlusion: false
+        anchor_ball_radius: 0.1
+        occlusion_class: 0
+        occlusion_prob: 0.5
+        downsample_type: fps
+      dataset_type: ${benchmark.name}
+      dataset_root: /home/mfi/repos/rtc_vision_toolbox/data/demonstrations/06-27-dsub/learn_data/test
+      dataset_indices: null
+      num_demo: null
+      min_num_points: 2048
+      cloud_type: ${...train_dset.demo_dset.cloud_type}
+      action_class: ${...train_dset.demo_dset.action_class}
+      anchor_class: ${...train_dset.demo_dset.anchor_class}
+      min_num_cameras: ${...train_dset.demo_dset.min_num_cameras}
+      max_num_cameras: ${...train_dset.demo_dset.max_num_cameras}
+      normalize_dist: ${...train_dset.demo_dset.normalize_dist}
+      object_type: ${task.name}
+      action: ${task.phase.name}
+      symmetry_after_transform: ${...train_dset.demo_dset.symmetry_after_transform}
+      synthetic_occlusion: false
+      distractor_anchor_aug: ${...train_dset.demo_dset.distractor_anchor_aug}
+      distractor_rot_sample_method: ${...train_dset.demo_dset.distractor_rot_sample_method}
+      multimodal_transform_base: ${...train_dset.demo_dset.multimodal_transform_base}
+    num_points: ${..train_dset.num_points}
+    rotation_variance: ${..train_dset.rotation_variance}
+    translation_variance: ${..train_dset.translation_variance}
+    action_rot_sample_method: quat_uniform
+    anchor_rot_sample_method: random_flat_upright
+    dataset_size: ${..train_dset.dataset_size}
+    angle_degree: ${..train_dset.angle_degree}
+    synthetic_occlusion: ${..train_dset.synthetic_occlusion}
+    ball_radius: ${..train_dset.ball_radius}
+    plane_occlusion: ${..train_dset.plane_occlusion}
+    ball_occlusion: ${..train_dset.ball_occlusion}
+    plane_standoff: ${..train_dset.plane_standoff}
+    occlusion_class: ${..train_dset.occlusion_class}
+    symmetric_class: ${..train_dset.symmetric_class}
+    overfit: ${..train_dset.overfit}
+    num_overfit_transforms: ${..train_dset.num_overfit_transforms}
+    gripper_lr_label: ${..train_dset.gripper_lr_label}
+    testing_symmetry: true
+  train_folder: train
+  test_folder: test
+training:
+  batch_size: 6
+  max_epochs: 2000
+  sigmoid_on: true
+  lr: 0.0001
+  flow_supervision: both
+  displace_loss_weight: 1
+  direct_correspondence_loss_weight: 1
+  consistency_loss_weight: 0.1
+  load_from_checkpoint: false
+  checkpoint_file: null
+  image_logging_period: 1001
+  log_every_n_steps: 100
+  check_val_every_n_epoch: 10
+seed: 0
+break_symmetry: false
+resources:
+  num_workers: 16
+wandb:
+  group: waterproof_place
+  entity: shobhitagg
+  project: rtc
+  save_dir: ${output_dir}
+  artifact_dir: ${hydra:runtime.cwd}/wandb_artifacts
+log_dir: ${hydra:runtime.cwd}/logs
+output_dir: ${hydra:runtime.output_dir}
+lightning:
+  checkpoint_dir: ${output_dir}/checkpoints
+max_epochs: 375
+batch_size: 3
+? ''
+: ? ''
+  : ? ''
+    : object: dsub-male
+      num_demos: 5
+      data_dir: data/demonstrations/06-27-dsub
+      debug: false
+      image_segmentation_config: ''
+      placement_pose_estimation_config: ''
+      devices:
+        cameras:
+          cam0_board:
+            type: ZedRos
+            init_args:
+              camera_node: /cam0/zed_cam0
+              camera_type: zedx
+            setup:
+              T_base2cam: data/calibration_data/zed/T_base2cam0.npy
+          cam2_closeup:
+            type: ZedRos
+            init_args:
+              camera_node: /cam2/zed_cam2
+              camera_type: zedxm
+            setup:
+              T_base2cam: data/calibration_data/zed/T_base2cam2.npy
+          cam3_gripper:
+            type: RsRos
+            init_args:
+              camera_node: /camera/realsense2_camera
+              camera_type: d405
+            setup:
+              T_eef2cam: data/calibration_data/rs/T_eef2camera.npy
+        robot:
+          type: ROSRobot
+          init_args:
+            robot_name: yk_builder
+            rosmaster_ip: 172.26.179.142
+        gripper:
+          type: RobotiqGripper
+          init_args:
+            port: /dev/ttyUSB0
+      training:
+        num_demos: 3
+        test_ratio: 0.4
+        action:
+          class_idx: 0
+          camera: cam2_closeup
+          camera_type: on_base
+          view: gripper_close_up
+          crop_box:
+            min_bound:
+            - -200
+            - -60
+            - 0.0
+            max_bound:
+            - 200
+            - 60
+            - 200
+        anchor:
+          class_idx: 1
+          camera: cam3_gripper
+          camera_type: on_hand
+          view: ih_camera_view
+          crop_box:
+            min_bound:
+            - -53
+            - -28
+            - 0.0
+            max_bound:
+            - 53
+            - 25
+            - 300
+        target:
+          view: placement
+          bias:
+          - - 0
+            - 0
+            - 0
+            - 0.008
+          - - 0
+            - 0
+            - 0
+            - 0.001
+          - - 0
+            - 0
+            - 0
+            - 0.032
+          - - 0
+            - 0
+            - 0
+            - 0
+      execution:
+        action:
+          camera: ${..training.action.camera}
+          camera_type: ${..training.action.camera_type}
+          view: ${training.action.view}
+          crop_box: ${training.action.crop_box}
+        anchor:
+          camera: ${training.anchor.camera}
+          camera_type: ${training.anchor.camera_type}
+          view: ${training.anchor.view}
+          crop_box: ${training.anchor.crop_box}
+        target:
+          view: ${training.target.view}
+          bias: ${training.target.bias}

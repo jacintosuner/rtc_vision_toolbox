@@ -28,10 +28,8 @@ class ROSRobot:
         
         # subscribe to rosservices
         self.__move_to_pose_service = roslibpy.Service(self.ros_client, '/'+robot_name+'/yk_set_pose', 'yk_tasks/SetPose')
-        self.__move_to_joints_service = roslibpy.Service(self.ros_client, '/'+robot_name+'/yk_set_joints', 'yk_tasks/SetJoints')        
-        
-    def __del__(self):
-            self.ros_client.terminate()    
+        self.__move_to_joints_service = roslibpy.Service(self.ros_client, '/'+robot_name+'/yk_set_joints', 'yk_tasks/SetJoints')      
+        self.__enable_robot_service = roslibpy.Service(self.ros_client, '/'+robot_name+'/robot_enable', 'std_srvs/Trigger')  
     
     def get_eef_pose(self):
         # initialize tf client
@@ -91,15 +89,15 @@ class ROSRobot:
         pose_serial = {'position': {'x': position[0], 'y': position[1], 'z': position[2]},
                        'orientation': {'x': orientation[0], 'y': orientation[1], 'z': orientation[2], 'w': orientation[3]}}
         try:
+            enable_request = roslibpy.ServiceRequest({})
+            enable_response = self.__enable_robot_service.call(enable_request)
             request = roslibpy.ServiceRequest({'pose': pose_serial, 'base_frame': 'base_link'})
-            response = self.__move_to_pose_service.call(request)
-            print('Response:', response)
-            print('Response type:', type(response['pose']))
-            
-            return response['pose']
+            response = self.__move_to_pose_service.call(request)            
+            return True
+        
         except Exception as e:
             print('Try again. Error:', e)
-            return None
+            return False
     
     def move_to_joints(self, joint_values):
         
@@ -109,7 +107,13 @@ class ROSRobot:
         #serialize message and send to the service
         joint_state_serial = {'name': list(joint_names), 'position': joint_values}
         
-        request = roslibpy.ServiceRequest({'state': joint_state_serial})
-        response = self.__move_to_joints_service.call(request)
+        try:
+            enable_request = roslibpy.ServiceRequest({})
+            enable_response = self.__enable_robot_service.call(enable_request)
+            request = roslibpy.ServiceRequest({'state': joint_state_serial})
+            response = self.__move_to_joints_service.call(request)
+            return True
         
-        return None
+        except Exception as e:
+            print('Try again. Error:', e)
+            return False

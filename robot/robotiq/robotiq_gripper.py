@@ -60,7 +60,7 @@ class RobotiqGripper( mm.Instrument ):
             Address of the gripper (integer) usually 9.
         """
         mm.Instrument.__init__(self, portname, slaveaddress)
-        self.debug=True
+        self.debug=False
         self.mode=mm.MODE_RTU
         
         self.processing=False
@@ -73,8 +73,6 @@ class RobotiqGripper( mm.Instrument ):
         self.paramDic={}
         self.readAll()
        
-        print("readAll done")
-
         self.closemm=None
         self.closebit=None
         
@@ -225,7 +223,6 @@ class RobotiqGripper( mm.Instrument ):
         gripperStatusReg0="0"*(16-len(gripperStatusReg0))+gripperStatusReg0
         gripperStatusReg0=gripperStatusReg0[:8]
         #########################################
-        print(gripperStatusReg0)
         self.paramDic["gOBJ"]=gripperStatusReg0[0:2]
         #Object detection
         self.paramDic["gSTA"]=gripperStatusReg0[2:4]
@@ -426,7 +423,6 @@ class RobotiqGripper( mm.Instrument ):
         #input register variable
         self.registerDic.update({"gOBJ":{},"gSTA":{},"gGTO":{},"gACT":{},
                                 "kFLT":{},"gFLT":{},"gPR":{},"gPO":{},"gCU":{}})
-        print(self.registerDic)
         #gOBJ
         gOBJdic=self.registerDic["gOBJ"]
         
