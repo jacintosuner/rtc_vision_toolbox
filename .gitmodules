@@ -2,6 +2,10 @@
 	path = camera/orbbec/pyorbbecsdk
 	url = https://github.com/orbbec/pyorbbecsdk.git
 
-[submodule "OrbbecSDK_ROS1"]
-	path = camera/orbbec/tests/orbbec_ros_docker/OrbbecSDK_ROS1
-	url = https://github.com/orbbec/OrbbecSDK_ROS1.git
+[submodule "IGEV"]
+	path = camera/zed_ros/IGEV
+	url = https://github.com/gangweiX/IGEV.git
+
+[submodule "taxpose"]
+	path = models/taxpose
+	url = https://github.com/r-pad/taxpose.git
