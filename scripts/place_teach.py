@@ -25,4 +25,4 @@ if __name__ == "__main__":
     config: DictConfig = hydra.compose(config_name)
       
     place_teach = TeachPlace(config)
-    place_teach.collect_demonstration()
+    place_teach.collect_demonstrations()

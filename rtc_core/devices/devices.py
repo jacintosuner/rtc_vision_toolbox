@@ -17,14 +17,14 @@ from robot.ros_robot.ros_robot import ROSRobot
 
 class Devices:
 
-    def __init__(self, conf: DictConfig):
+    def __init__(self, conf: DictConfig, debug: bool = False):
         self.__cam = {}
         self.__robot = None
         self.__gripper = None
 
         # Initialize cameras
         for key in conf.cameras.keys():
-            match conf.cameras[key].type:
+            match conf.cameras[key]['class']:
                 case "ZedRos":
                     self.__cam[key] = ZedRos(
                         camera_node=conf.cameras[key].init_args.camera_node,
@@ -32,7 +32,8 @@ class Devices:
                         rosmaster_ip=conf.cameras[key].init_args.rosmaster_ip if conf.cameras[
                             key].init_args.rosmaster_ip is not None else "localhost",
                         rosmaster_port=conf.cameras[key].init_args.rosmaster_port if conf.cameras[
-                            key].init_args.rosmaster_port is not None else 9090
+                            key].init_args.rosmaster_port is not None else 9090,
+                        debug=debug
                     )
                 case "RsRos":
                     self.__cam[key] = RsRos(
@@ -41,7 +42,8 @@ class Devices:
                         rosmaster_ip=conf.cameras[key].init_args.rosmaster_ip if conf.cameras[
                             key].init_args.rosmaster_ip is not None else "localhost",
                         rosmaster_port=conf.cameras[key].init_args.rosmaster_port if conf.cameras[
-                            key].init_args.rosmaster_port is not None else 9090
+                            key].init_args.rosmaster_port is not None else 9090,
+                        debug=debug
                     )
                 case "OBCamera":
                     self.__cam[key] = OBCamera(
@@ -64,12 +66,19 @@ class Devices:
     def robot_get_eef_pose(self) -> np.ndarray:
         return self.__robot.get_eef_pose()
 
-    def robot_move_to_pose(self, pose: np.ndarray) -> None:
+    def robot_move_to_pose(self, pose: np.ndarray, 
+                           max_velocity_scaling_factor=0.3, 
+                           max_acceleration_scaling_factor=0.3) -> None:
         for _ in range(3):
-            while not self.__robot.move_to_pose(
-                position=pose[:3, 3], orientation=pose[:3, :3]
+            if not self.__robot.move_to_pose(
+                position=pose[:3, 3], orientation=pose[:3, :3],
+                max_velocity_scaling_factor=max_velocity_scaling_factor,
+                max_acceleration_scaling_factor=max_acceleration_scaling_factor
             ):
                 print(f"Failed to move to pose.")
+            else:
+                return True
+        return False
 
     def gripper_open(self) -> None:
         self.__gripper.openGripper()

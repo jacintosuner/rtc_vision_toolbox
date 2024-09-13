@@ -39,10 +39,18 @@ class RsRos:
     __depth_mode    :str = None
     __camera_type   :str = None # 'd405'
 
-    def __init__(self, camera_node: str, camera_type: str, rosmaster_ip='localhost', rosmaster_port=9090, depth_mode='igev'):
+    def __init__(self, camera_node: str, 
+                 camera_type: str, 
+                 rosmaster_ip='localhost', 
+                 rosmaster_port=9090, 
+                 depth_mode='igev',
+                 debug=False):
         """
         Initializes the Camera object.
         """
+        
+        self.debug = debug
+        
         # initialize ros client
         self.__ros_client = roslibpy.Ros(host=rosmaster_ip, port=rosmaster_port)
         self.__ros_client.run()
@@ -60,7 +68,11 @@ class RsRos:
         self.__camera_type = camera_type
         self.__camera_node = camera_node
         self.__depth_mode = depth_mode
-
+        
+        self.__topic_prefix = camera_node
+        # remove 'realsense2_camera' from the node name
+        self.__topic_prefix = self.__topic_prefix[:self.__topic_prefix.rfind('/')]
+        
     def __del__(self):
         # self.__ros_client.terminate()
         pass
@@ -92,7 +104,7 @@ class RsRos:
             depth_data (numpy.ndarray): Raw depth data (in mm) captured from the camera.
         """
         depth_data :np.array = None
-
+        
         if method is None:
             method = self.__depth_mode
 
@@ -203,7 +215,7 @@ class RsRos:
             camera_matrix: Intrinsics of the camera as camera matrix.
         """
 
-        camera_info_sub = roslibpy.Topic(self.__ros_client, '/camera' + '/color/camera_info', 'sensor_msgs/CameraInfo')        
+        camera_info_sub = roslibpy.Topic(self.__ros_client, self.__topic_prefix + '/color/camera_info', 'sensor_msgs/CameraInfo')        
 
         def callback(message):
             nonlocal camera_matrix
@@ -227,7 +239,7 @@ class RsRos:
             camera_matrix: Intrinsics of the camera as camera matrix.
         """
 
-        camera_info_sub = roslibpy.Topic(self.__ros_client, '/camera' + '/infra1/camera_info', 'sensor_msgs/CameraInfo')        
+        camera_info_sub = roslibpy.Topic(self.__ros_client, self.__topic_prefix + '/infra1/camera_info', 'sensor_msgs/CameraInfo')        
 
         def callback(message):
             nonlocal camera_matrix
@@ -250,7 +262,7 @@ class RsRos:
         Returns:
             camera_matrix: Intrinsics of the camera as camera matrix.
         """
-        camera_info_sub = roslibpy.Topic(self.__ros_client, '/camera' + '/depth/camera_info', 'sensor_msgs/CameraInfo')        
+        camera_info_sub = roslibpy.Topic(self.__ros_client, self.__topic_prefix + '/depth/camera_info', 'sensor_msgs/CameraInfo')        
 
         def callback(message):
             nonlocal camera_matrix
@@ -270,7 +282,7 @@ class RsRos:
         Returns:
             distortion: Distortion coefficients of the camera.
         """
-        camera_info_sub = roslibpy.Topic(self.__ros_client, '/camera' + '/color/camera_info', 'sensor_msgs/CameraInfo')        
+        camera_info_sub = roslibpy.Topic(self.__ros_client, self.__topic_prefix + '/color/camera_info', 'sensor_msgs/CameraInfo')        
 
         def callback(message):
             nonlocal distortion
@@ -291,7 +303,7 @@ class RsRos:
         Returns:
             distortion: Distortion coefficients of the camera.
         """
-        camera_info_sub = roslibpy.Topic(self.__ros_client, '/camera' + '/infra1/camera_info', 'sensor_msgs/CameraInfo')        
+        camera_info_sub = roslibpy.Topic(self.__ros_client, self.__topic_prefix + '/infra1/camera_info', 'sensor_msgs/CameraInfo')        
 
         def callback(message):
             nonlocal distortion
@@ -312,7 +324,7 @@ class RsRos:
         Returns:
             distortion: Distortion coefficients of the camera.
         """
-        camera_info_sub = roslibpy.Topic(self.__ros_client, '/camera' + '/depth/camera_info', 'sensor_msgs/CameraInfo')        
+        camera_info_sub = roslibpy.Topic(self.__ros_client, self.__topic_prefix + '/depth/camera_info', 'sensor_msgs/CameraInfo')        
 
         def callback(message):
             nonlocal distortion
@@ -357,7 +369,7 @@ class RsRos:
             else:
                 raise TypeError(f'Unsupported encoding: {encoding}')
         time_stamp_1 = time.time()        
-        image_subscriber = roslibpy.Topic(self.__ros_client, '/camera'+ topic_name, 'sensor_msgs/Image')        
+        image_subscriber = roslibpy.Topic(self.__ros_client, self.__topic_prefix + topic_name, 'sensor_msgs/Image')        
         def callback(img_msg):
             nonlocal image
             img_msg['data'] = base64.b64decode(img_msg['data'])
@@ -392,12 +404,47 @@ class RsRos:
 
         time_stamp_3 = time.time()
 
-        print(f"Time taken to get image: {time_stamp_3 - time_stamp_2}s")
+        if self.debug:
+            print(f"Time taken to get image: {time_stamp_3 - time_stamp_2}s")
 
         image_subscriber.unsubscribe()        
 
         return image
+    
+    def __get_compressedimage_from_rostopic(self, topic_name: str):
+        """
+        Get image from ROS topic.
+        Based on cv_bridge implementation
+        https://github.com/ros-perception/vision_opencv/blob/a34a0c261984e4ab71f267d093f6a48820801d80/cv_bridge/python/cv_bridge/core.py#L147
+        """
+        
+        def callback(img_msg):
+            print("Got image!")
+            nonlocal image, image_subscriber
+            img_msg['data'] = base64.b64decode(img_msg['data'])
+            img_msg['data'] = np.frombuffer(img_msg['data'], dtype=np.uint8)
+            
+            img_buf = np.ndarray(shape=(1, len(img_msg['data'])),
+                                 dtype=np.uint8, buffer=img_msg['data'])
+            
+            image = cv2.imdecode(img_buf, cv2.IMREAD_UNCHANGED)
+            image_subscriber.unsubscribe()
 
+        image_subscriber = roslibpy.Topic(self.__ros_client, self.__topic_prefix + topic_name, 'sensor_msgs/CompressedImage')        
+
+        image :np.ndarray = None
+        image_subscriber.subscribe(lambda message: callback(message))
+        time_stamp_2 = time.time()
+        while image is None:
+            continue
+
+        time_stamp_3 = time.time()
+        
+        if self.debug:
+            print(f"Time taken to get image: {time_stamp_3 - time_stamp_2}s")
+            
+        return image
+    
     def __get_pointcloud_from_rostopic(self, topic_name: str):
         """
         Get pointcloud from ROS topic.
@@ -417,7 +464,7 @@ class RsRos:
 
         pcd_subscriber = roslibpy.Topic(
             self.__ros_client,
-            "/camera" + topic_name,
+            self.__topic_prefix + topic_name,
             "sensor_msgs/PointCloud2",
         )
 
@@ -593,8 +640,9 @@ class RsRos:
         Get disparity map using IGEV method.
         """
         left_image, right_image = self.__get_stereo_images()
-
-        print("::::::starting IGEV estimation::::::")
+        
+        if self.debug:
+            print("::::::starting IGEV estimation::::::")
 
         args = self.__get_default_IGEV_args()        
         model = torch.nn.DataParallel(IGEVStereo(args), device_ids=[0])
@@ -627,7 +675,8 @@ class RsRos:
 
             igev_disp, disp_prob = model(image1, image2, iters=32, test_mode=True)
             end = time.time()
-            print("torch inference time: ", end - start)
+            if self.debug:
+                print("torch inference time: ", end - start)
             igev_disp = igev_disp.cpu().numpy()
             igev_disp = padder.unpad(igev_disp)
             igev_disp = igev_disp.squeeze()
@@ -645,10 +694,10 @@ class RsRos:
             
             np.save("disp_prob.npy", disp_prob)
             
-            print("::::::IGEV estimation finished::::::")
-            
-            print("disp_prob: ", disp_prob.shape)
-            print("IGEV disp shape: ", igev_disp.shape)
+            if self.debug:
+                print("::::::IGEV estimation finished::::::")
+                print("disp_prob: ", disp_prob.shape)
+                print("IGEV disp shape: ", igev_disp.shape)
 
             return igev_disp
 
@@ -685,7 +734,8 @@ class RsRos:
                     z = image_3d[i][j][2]*1000
                     pt = [x, y, z]
                     points.append(pt)
-            print("finished")   
+            if self.debug:
+                print("finished")   
 
             points = np.array(points)
             new_points = []
@@ -709,6 +759,8 @@ class RsRos:
         # GET RIGHT AND LEFT IMAGES
         left_image = self.__get_image_from_rostopic('/infra1/image_rect_raw')
         right_image = self.__get_image_from_rostopic('/infra2/image_rect_raw')
+        # left_image = self.__get_compressedimage_from_rostopic('/infra1/image_rect_raw/compressed')
+        # right_image = self.__get_compressedimage_from_rostopic('/infra2/image_rect_raw/compressed')
 
         # convert to 3 channel image
         left_image = cv2.cvtColor(left_image, cv2.COLOR_GRAY2BGR)

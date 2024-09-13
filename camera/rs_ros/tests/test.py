@@ -74,7 +74,7 @@ if __name__ == "__main__":
 
     print("Testing Realsense ROS class")
 
-    camera = RsRos(camera_node=f"/camera/realsense2_camera", camera_type="d405")
+    camera = RsRos(camera_node=f"/camera/realsense2_camera", camera_type="d405", rosmaster_ip="192.168.1.2", debug=True)
 
     print("Available tests: ")
     print("1. Get RGB/DEPTH/INFRA intrinsics")

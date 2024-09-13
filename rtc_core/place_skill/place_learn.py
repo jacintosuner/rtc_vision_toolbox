@@ -205,7 +205,7 @@ class LearnPlace:
         np.save(os.path.join(save_dir, f"pre_{cfg.training.target.view}_offset.npy"),
                 pre_placement_offset)
 
-    def prepare_dataset(self) -> None:
+    def prepare_dataset_old(self) -> None:
 
         project_dir = self.project_dir
         cfg = self.cfg
@@ -279,8 +279,7 @@ class LearnPlace:
                 raise ValueError(f"Invalid camera type for anchor camera: {anchor_cam_type}")
 
             action_target = target_pose @ np.linalg.inv(action_pose)
-            data_list[i]['action']['tf'] = (
-                action_target @ action_tf) + target_bias
+            data_list[i]['action']['tf'] = (action_target @ action_tf) + target_bias
             data_list[i]['anchor']['tf'] = anchor_tf
 
         # Load point cloud data
@@ -345,16 +344,142 @@ class LearnPlace:
             
         breakpoint()
 
+    def prepare_dataset(self) -> None:
+        project_dir = self.project_dir
+        cfg = self.cfg
+        data_dir = os.path.join(project_dir, cfg.data_dir)
+        num_demos = cfg.training.num_demos
+        train_demos = np.ceil(
+            num_demos * (1-cfg.training.test_ratio)).astype(int)
+        test_demos = num_demos - train_demos
+        action_class = cfg.training.action.class_idx
+        anchor_class = cfg.training.anchor.class_idx
+        ctr = 0
+        
+        teach_pcd_dir = os.path.join(data_dir, "teach_data/pcd_data")
+        teach_pose_dir = os.path.join(data_dir, "teach_data/pose_data")
+        train_save_dir = os.path.join(data_dir, "learn_data/train")
+        test_save_dir = os.path.join(data_dir, "learn_data/test")
+        
+        for demo in range(num_demos):
+            print(f"Processing demo {demo}")
+            anchor_points_list = []
+            action_points_list = []
+            
+            anchor_pcd_file = os.path.join(teach_pcd_dir, f"demo{demo}_{cfg.training.anchor.view}0_{cfg.training.anchor.camera}_pointcloud.ply")
+            anchor_pcd = o3d.io.read_point_cloud(anchor_pcd_file)
+            anchor_pcd = self.__filter_point_cloud(anchor_pcd)
+            
+            #scale point cloud
+            anchor_points = np.asarray(anchor_pcd.points) / 1000
+            anchor_pcd.points = o3d.utility.Vector3dVector(anchor_points)
+            
+            anchor_view_pose_file = os.path.join(teach_pose_dir, f"demo{demo}_{cfg.training.anchor.view}0_pose.npy")
+            T_eef2cam_file = cfg.devices.cameras[cfg.training.anchor.camera].setup.T_eef2cam
+            
+            # anchor view point
+            T_base2eef = np.load(anchor_view_pose_file)
+            T_eef2cam = np.load(os.path.join(project_dir, T_eef2cam_file))
+            T_base2cam = np.dot(T_base2eef, T_eef2cam)
+            
+            # target pose
+            T_base2targeteef = np.load(os.path.join(teach_pose_dir, f"demo0_placement_pose.npy"))
+            T_ee2target = [[1, 0, 0, 0],
+                           [0, 1, 0, 0],
+                           [0, 0, 1, 0.212],
+                           [0, 0, 0, 1]]        
+            T_base2target = np.dot(T_base2targeteef, T_ee2target)
+            
+            T_base2placeeef = np.load(os.path.join(teach_pose_dir, f"demo{demo}_placement_pose.npy"))
+            T_base2place = np.dot(T_base2placeeef, T_ee2target)
+
+            # transform anchor pcd in target pose frame for easy cropping
+            crop_tf = np.dot(np.linalg.inv(T_base2target), T_base2cam)
+            anchor_pcd = anchor_pcd.transform(crop_tf)
+
+            # crop_points
+            anchor_bounds = cfg.training.anchor.object_bounds
+            object_bounds = {
+                'min': np.array(anchor_bounds.min)/1000,
+                'max': np.array(anchor_bounds.max)/1000
+            }
+            anchor_pcd = self.__crop_point_cloud(anchor_pcd, object_bounds)
+            anchor_points_list.append(np.asarray(anchor_pcd.points))    
+            
+            # transform target pose frame to placement pose
+            place_tf = np.linalg.inv(T_base2place) @ T_base2target
+                        
+            for var in range(cfg.training.action.view_variations.count):
+                # action point clouds @ target
+                action_pcd_file = os.path.join(teach_pcd_dir, f"demo{demo}_{cfg.training.action.view}{var}_{cfg.training.action.camera}_pointcloud.ply")
+                action_pcd = o3d.io.read_point_cloud(action_pcd_file)
+                action_pcd = self.__filter_point_cloud(action_pcd)
+
+                #scale point cloud
+                action_points = np.asarray(action_pcd.points) / 1000
+                action_pcd.points = o3d.utility.Vector3dVector(action_points)
+                
+                action_view_pose_file = os.path.join(teach_pose_dir, f"demo{demo}_{cfg.training.action.view}{var}_pose.npy")
+                T_base2action = np.load(action_view_pose_file)
+                T_base2cam_file = cfg.devices.cameras[cfg.training.action.camera].setup.T_base2cam
+                T_base2cam = np.load(os.path.join(project_dir, T_base2cam_file))
+                action_tf = np.linalg.inv(T_ee2target) @ (np.linalg.inv(T_base2action) @ T_base2cam)
+                action_pcd = action_pcd.transform(action_tf)
+                action_pcd = action_pcd.transform(np.linalg.inv(place_tf))
+                
+                action_points = np.asarray(action_pcd.points)
+                action_points = action_points[action_points[:, 2] > self.cfg.training.action.object_bounds.min[2]/1000]     
+                action_points_list.append(action_points)
+            
+            # save data to train or test dir
+            if not os.path.exists(train_save_dir):
+                os.makedirs(train_save_dir)
+            if not os.path.exists(test_save_dir):
+                os.makedirs(test_save_dir)            
+
+            for anchor in anchor_points_list:
+                anchor[:, 2] = -anchor[:, 2]
+                for action in action_points_list:
+                    action[:, 2] = -action[:, 2]
+                    clouds = np.concatenate([action, anchor], axis=0)
+                    classes = np.concatenate(
+                        [np.full(action.shape[0], action_class),
+                        np.full(anchor.shape[0], anchor_class)],
+                        axis=0)
+                    file_name = f'{ctr}_teleport_obj_points.npz'
+                    save_dir = train_save_dir if demo < train_demos else test_save_dir
+                    np.savez_compressed(
+                        os.path.join(save_dir, file_name),
+                        clouds=clouds,
+                        classes=classes,
+                        colors=None,
+                        shapenet_ids=None)
+                    ctr += 1
+            
+    def __crop_points(self, points: np.ndarray, crop_box: Dict[str, float]) -> np.ndarray:
+
+        mask = np.logical_and.reduce(
+            (points[:, 0] >= crop_box['min'][0],
+                points[:, 0] <= crop_box['max'][0],
+                points[:, 1] >= crop_box['min'][1],
+                points[:, 1] <= crop_box['max'][1],
+                points[:, 2] >= crop_box['min'][2],
+                points[:, 2] <= crop_box['max'][2])
+        )
+        points = points[mask]
+
+        return points
+
     def __crop_point_cloud(self, pcd: o3d.geometry.PointCloud, crop_box: Dict[str, float]) -> o3d.geometry.PointCloud:
 
         points = np.asarray(pcd.points)
         mask = np.logical_and.reduce(
-            (points[:, 0] >= crop_box['min_bound'][0],
-             points[:, 0] <= crop_box['max_bound'][0],
-             points[:, 1] >= crop_box['min_bound'][1],
-             points[:, 1] <= crop_box['max_bound'][1],
-             points[:, 2] >= crop_box['min_bound'][2],
-             points[:, 2] <= crop_box['max_bound'][2])
+            (points[:, 0] >= crop_box['min'][0],
+             points[:, 0] <= crop_box['max'][0],
+             points[:, 1] >= crop_box['min'][1],
+             points[:, 1] <= crop_box['max'][1],
+             points[:, 2] >= crop_box['min'][2],
+             points[:, 2] <= crop_box['max'][2])
         )
         points = points[mask]
 
@@ -364,7 +489,7 @@ class LearnPlace:
         return pcd_t
 
     def __filter_point_cloud(self, pcd: o3d.geometry.PointCloud) -> o3d.geometry.PointCloud:
-        pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
+        pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=1.0)
         return pcd
 
     def __load_emb_weights(self, checkpoint_reference, wandb_cfg=None, run=None):

@@ -28,4 +28,4 @@ if __name__ == "__main__":
     
     place_learn = LearnPlace(config)
     place_learn.prepare_dataset()
-    place_learn.get_pre_placement_offset()
+    # place_learn.get_pre_placement_offset()

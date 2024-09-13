@@ -10,16 +10,16 @@ import hydra
 import numpy as np
 import open3d as o3d
 import torch
-from omegaconf import DictConfig, OmegaConf
 from hydra.core.global_hydra import GlobalHydra
+from omegaconf import DictConfig, OmegaConf
 from pytorch3d.transforms import Transform3d
+from scipy.spatial.transform import Rotation as R
 from taxpose.datasets.augmentations import maybe_downsample
 from taxpose.nets.transformer_flow import ResidualFlow_DiffEmbTransformer
 from taxpose.training.flow_equivariance_training_module_nocentering import \
     EquivarianceTrainingModule
 from taxpose.utils.load_model import get_weights_path
 from taxpose.utils.se3 import random_se3
-
 
 from rtc_core.devices.devices import Devices
 
@@ -40,31 +40,24 @@ class ExecutePlace:
 
     def __init__(self, cfg: DictConfig):
         self.cfg = cfg
-        self.devices = Devices(cfg.devices)
+        self.debug = cfg.debug
+        self.devices = Devices(cfg.devices, cfg.debug)
         current_dir = os.path.dirname(os.path.realpath(__file__))
         self.project_dir = os.path.join(current_dir, "../..")
-
-        self.predict_board_pose_data = {
-            "image_segmentation_model": None,
-            "camera": "cam0_board",
-            "view": "out_of_way",
-            "rgb": None,
-            "depth_data": None,
-        }
 
         self.predict_placement_pose_data = {
             "taxpose_model": self.load_taxpose_model(cfg),
             "action": {
                 "camera": cfg.execution.action.camera,
-                "view": cfg.execution.action.view,
-                "camera_type": cfg.execution.action.camera_type,
+                "view": cfg.execution.action.view,                
+                "camera_type": cfg.devices.cameras[cfg.execution.action.camera]['type'],
                 "pcd": None,
                 "eef_pose": None,
             },
             "anchor": {
                 "camera": cfg.execution.anchor.camera,
                 "view": cfg.execution.anchor.view,
-                "camera_type": cfg.execution.anchor.camera_type,
+                "camera_type": cfg.devices.cameras[cfg.execution.anchor.camera]['type'],
                 "pcd": None,
                 "eef_pose": None,
             }
@@ -72,9 +65,7 @@ class ExecutePlace:
 
         self.data_dir: str = os.path.join(self.project_dir, cfg.data_dir)
         self.save_dir: str = None
-        self.object: str = None
-        self.debug = cfg.debug
-        self.object = cfg.object
+        self.object: str = cfg.object
 
         now = datetime.datetime.now().strftime("%m%d_%H%M")
         self.save_dir = os.path.join(self.data_dir, f"execute_data/{now}")
@@ -89,22 +80,18 @@ class ExecutePlace:
             os.makedirs(self.save_dir)
             print(f"Save directory: {self.save_dir}")
 
-        cam_keys = list(cfg.devices.cameras.keys())
-        self.cam_setup = {key: {} for key in cam_keys}
+        self.cam_setup = {key: {} for key in list(cfg.devices.cameras.keys())}
 
         for key in self.cam_setup.keys():
-            if key not in cfg.devices.cameras.keys():
-                continue
             for subkey in cfg.devices.cameras[key]['setup'].keys():
                 filepath = os.path.join(
                     self.project_dir, cfg.devices.cameras[key]['setup'][subkey])
                 self.cam_setup[key][subkey] = np.load(filepath)
 
         self.poses = {
-            "start_pose": np.load(os.path.join(self.data_dir, "poses", "start_pose.npy")),
-            "out_of_way_pose": np.load(os.path.join(self.data_dir, "poses", "out_of_way_pose.npy")),
-            "gripper_close_up_pose": np.load(os.path.join(self.data_dir, "poses", "gripper_close_up_pose.npy")),
-            "pre_placement_offset": np.load(os.path.join(self.data_dir, "learn_data", "pre_placement_offset.npy")),
+            "home_pose": np.load(os.path.join(self.data_dir, "poses", "home_pose.npy")),
+            "ih_camera_view_pose": np.load(os.path.join(self.data_dir, "poses", "ih_camera_view_pose.npy")),
+            "target_pose": np.load(os.path.join(self.data_dir, "poses", "target_pose.npy")),
         }
 
         print(f"Setup done for {self.object.upper()}")
@@ -113,16 +100,15 @@ class ExecutePlace:
 
         print(f"EXECUTING PLACE FOR {self.object.upper()}")
 
-        print("################################################################################")
-        print("1. Start Pose")
-        print("################################################################################")
+        print("####################################################################")
+        print("1. HOME POSE")
+        print("####################################################################")
 
-        self.devices.robot_move_to_pose(self.poses['start_pose'])
-        time.sleep(0.5)
-
-        print("################################################################################")
-        print("2. Grasp Object")
-        print("################################################################################")
+        self.devices.robot_move_to_pose(self.poses['home_pose'])
+        
+        print("####################################################################")
+        print("2. GRASP OBJECT")
+        print("####################################################################")
 
         print("Open gripper")
 
@@ -134,206 +120,173 @@ class ExecutePlace:
         self.devices.gripper_close()
         time.sleep(0.5)
 
-        print("################################################################################")
-        print("3. Out of Way Pose")
-        print("################################################################################")
-
-        self.devices.robot_move_to_pose(self.poses['out_of_way_pose'])
-
-        time.sleep(0.5)
-
-        self.collect_data("out_of_way")
-        time.sleep(0.5)
-
-        print("################################################################################")
-        print("4. Gripper Close Up Pose")
-        print("################################################################################")
-
-        self.devices.robot_move_to_pose(self.poses['start_pose'])
-
-        print(f"Moving to object in hand close up pose...")
-        self.devices.robot_move_to_pose(
-            self.poses['gripper_close_up_pose'])
-
-        time.sleep(0.5)
-
-        self.collect_data("gripper_close_up")
-        time.sleep(0.5)
-
-        print("################################################################################")
-        print("5. Predict and Move to Approx Pre Placement Pose")
-        print("################################################################################")
-        approx_pre_placement_pose = self.infer_board_pose()
-
-        print(f"Approx Pre Placement Pose: \n{approx_pre_placement_pose}")
-        continue_execution = input(
-            "Press Enter to continue execution. Press 'c' to debug:")
-        if continue_execution == "c":
-            breakpoint()
-
-        self.devices.robot_move_to_pose(approx_pre_placement_pose)
-        self.collect_data("ih_camera_view")
-
-        time.sleep(0.5)
-
-        print("################################################################################")
-        print("7. Infer Placement Pose and Move to Placement Pose offset")
-        print("################################################################################")
-
-        placement_pose = np.dot(self.infer_placement_pose(), np.eye(4))
-        offset_placement_pose = np.dot(
-            placement_pose, self.poses['pre_placement_offset'])
-        continue_execution = 'c'
+        retry = True
+        retry_ctr = 0
         
-        while continue_execution == 'c':
-            continue_execution = input(
-                "Press Enter to continue execution. Press 'c' to try again with ih_pose:")
-            if continue_execution == "c":
-                input("Press Enter when in ih_pose...")
-                self.collect_data("ih_camera_view")
-                placement_pose = np.dot(self.infer_placement_pose(), np.eye(4))
-                offset_placement_pose = np.dot(
-                    placement_pose, self.poses['pre_placement_offset'])
-                        
-        self.devices.robot_move_to_pose(offset_placement_pose)
-        time.sleep(0.5)
+        while retry:
+            print("####################################################################")
+            print("3. GRIPPER CLOSE UP VIEW")
+            print("####################################################################")
+            
+            print(f"Moving to object in hand close up pose...")
+            T_base2camera = self.cam_setup[self.cfg.training.action.camera]["T_base2cam"]
+            distance = 0.400
+            T_camera2gripper = np.array([
+                [1,  0,  0, 0],
+                [0, -1,  0, 0],
+                [0,  0, -1, distance],
+                [0,  0,  0, 1]])
+            T_base2gripper = np.dot(T_base2camera, T_camera2gripper)
+            gripper_close_up_pose = T_base2gripper
 
-        print("################################################################################")
-        print("8. Final Placement")
-        print("################################################################################")
+            self.devices.robot_move_to_pose(gripper_close_up_pose)
+            self.collect_data("gripper_close_up_view")
+                    
+            print("####################################################################")
+            print("3. IN-HAND CAMERA VIEW")
+            print("####################################################################")
+            
+            self.devices.robot_move_to_pose(self.poses['home_pose'])
+            
+            print(f"Moving to in-hand camera view pose...")
+            self.devices.robot_move_to_pose(self.poses['ih_camera_view_pose'])
+            self.collect_data("ih_camera_view")
 
-        continue_execution = input(
-            "Press Enter to continue execution. Press 'c' to debug:")
-        if continue_execution == "c":
-            breakpoint()
-
+            print("####################################################################")
+            print("5. PREDICTING PLACEMENT POSE")
+            print("####################################################################")
+            
+            placement_pose = self.infer_placement_pose()
+            pre_placement_pose = placement_pose.copy()
+            pre_placement_pose[2, 3] = placement_pose[2, 3] + 0.015
+            
+            np.save(self.save_dir + "/pose_data/placement_pose.npy", placement_pose)
+            
+            print("####################################################################")
+            print("6. PERFORM PLACEMENT")
+            print("####################################################################")
+            
+            print("Moving to pre-target pose...")
+            
+            pre_target_pose = self.poses['target_pose'].copy()
+            pre_target_pose[2, 3] = self.poses['home_pose'][2, 3]
+            self.devices.robot_move_to_pose(pre_target_pose)
+            
+            input("Press Enter to continue...")
+            
+            self.devices.robot_move_to_pose(pre_placement_pose)
+        
+            retry_input = input("Press 'r' to retry or Enter to continue...")
+            retry = retry_input == 'r'
+            if retry:
+                retry_ctr += 1
+                self.save_dir = self.save_dir + "_r" + str(retry_ctr)
+                if not os.path.exists(self.save_dir):
+                    os.makedirs(self.save_dir)
+                    print(f"Save directory: {self.save_dir}")
+            
         self.devices.robot_move_to_pose(placement_pose)
         
-        input("Press Enter to return to release and start pose continue...")
-        time.sleep(0.5)
-
-        print("################################################################################")
-        print("9. Return to Start Pose")
-        print("################################################################################")
-
+        print("####################################################################")
+        print("7. FINISHING UP")
+        print("####################################################################")
+        
         self.devices.gripper_open()
         time.sleep(0.5)
-        self.devices.robot_move_to_pose(self.poses['start_pose'])
+        self.devices.robot_move_to_pose(self.poses['home_pose'])
 
-        print("################################################################################")
         print(f"\033[1m\033[3m{self.object.upper()} PLACEMENT DONE!\033[0m")
 
-    def infer_board_pose(self) -> np.ndarray:
-        self.devices.robot_move_to_pose(self.poses['start_pose'])
-        input("Move closer to the placement pose and Press Enter")
-        return self.devices.robot_get_eef_pose()
-
     def infer_placement_pose(self) -> np.ndarray:
+        
+        T_ee2target = [[1, 0, 0, 0],
+                       [0, 1, 0, 0],
+                       [0, 0, 1, 0.212],
+                       [0, 0, 0, 1]]  
 
-        action_pcd_raw = self.predict_placement_pose_data['action']['pcd']
-        action_crop_box = self.cfg.execution.action.crop_box
-
-        action_pcd = self.crop_point_cloud(action_pcd_raw, action_crop_box)
+        # PREPARE DATA FOR INFERENCE: ACTION POINTCLOUD
+        action_pcd = self.predict_placement_pose_data['action']['pcd']
+        action_points = np.asarray(action_pcd.points) / 1000
+        action_pcd.points = o3d.utility.Vector3dVector(action_points)
         action_pcd = self.filter_point_cloud(action_pcd)
-        action_pcd.points = o3d.utility.Vector3dVector(
-            np.asarray(action_pcd.points)/1000)
-
-        anchor_pcd_raw = self.predict_placement_pose_data['anchor']['pcd']
-        anchor_crop_box = self.cfg.execution.anchor.crop_box
         
-        anchor_pcd = self.crop_point_cloud(anchor_pcd_raw, anchor_crop_box)
-        anchor_pcd = self.filter_point_cloud(anchor_pcd)
-        anchor_pcd.points = o3d.utility.Vector3dVector(
-            np.asarray(anchor_pcd.points)/1000)
-
-        def get_transform(type: str) -> np.ndarray:
-            if self.cfg.execution[type].camera_type == "on_base":
-                return self.cam_setup[self.cfg.execution[type].camera][f"T_base2cam"]
-            elif self.cfg.execution[type].camera_type == "on_hand":
-                T_base2eef = self.predict_placement_pose_data[type]['eef_pose']
-                T_eef2cam = self.cam_setup[self.cfg.execution[type].camera][f"T_eef2cam"]
-                return np.dot(T_base2eef, T_eef2cam)
+        T_base2action = self.predict_placement_pose_data['action']['eef_pose']
+        T_base2cam = self.cam_setup[self.cfg.execution.action.camera][f"T_base2cam"]
+        action_tf = np.linalg.inv(T_ee2target) @ (np.linalg.inv(T_base2action) @ T_base2cam)
+        action_pcd = action_pcd.transform(action_tf)
         
-        action_pcd_tf = action_pcd.transform(get_transform('action'))
-        anchor_pcd_tf = anchor_pcd.transform(get_transform('anchor'))
+        action_points = np.asarray(action_pcd.points)
+        action_points = action_points[action_points[:, 2] > 0]
         
-        np.save(self.save_dir + "/anchor_final.npy", np.asarray(anchor_pcd_tf.points))
-
-        action_points = np.asarray(action_pcd_tf.points).astype(np.float32)
-        anchor_points = np.asarray(anchor_pcd_tf.points).astype(np.float32)
-        place_pose = self.infer_taxpose(action_points, anchor_points)
-
-        place_pose = np.dot(place_pose, np.eye(4))
-        place_pose = place_pose + self.cfg.execution.target.bias
-
-        return place_pose
-
-    def infer_placement_pose_old(self) -> np.ndarray:
-
-        action_pcd_raw = self.predict_placement_pose_data['action']['pcd']
-        action_crop_box = {
-            'min_bound': np.array([-200, -60, 0.0]),
-            'max_bound': np.array([200, 60, 200]),
+        # PREPARE DATA FOR INFERENCE: ANCHOR POINTCLOUD
+        anchor_pcd = self.predict_placement_pose_data['anchor']['pcd']
+        anchor_points = np.asarray(anchor_pcd.points) / 1000
+        anchor_pcd.points = o3d.utility.Vector3dVector(anchor_points)
+              
+        T_eef2cam = self.cam_setup[self.cfg.execution.anchor.camera][f"T_eef2cam"]
+        T_base2anchor = self.predict_placement_pose_data['anchor']['eef_pose']
+        T_base2cam = T_base2anchor @ T_eef2cam
+        T_base2target = self.poses['target_pose'] @ T_ee2target
+        
+        crop_tf = np.linalg.inv(T_base2target) @ T_base2cam
+        anchor_pcd = anchor_pcd.transform(crop_tf)
+        anchor_bounds = self.cfg.execution.anchor.object_bounds
+        object_bounds = {
+            'min': np.array(anchor_bounds.min)/1000,
+            'max': np.array(anchor_bounds.max)/1000
         }
-        action_pcd = self.crop_point_cloud(action_pcd_raw, action_crop_box)
-        action_pcd = self.filter_point_cloud(action_pcd)
-        action_pcd.points = o3d.utility.Vector3dVector(
-            np.asarray(action_pcd.points)/1000)
-
-        anchor_pcd_raw = self.predict_placement_pose_data['anchor']['pcd']
-        anchor_crop_box = {
-            'min_bound': np.array([-53, -28, 0.0]),
-            'max_bound': np.array([53, 25, 300])
-        }
+        np.save(self.save_dir + "/anchortest.npy", np.asarray(anchor_pcd.points))
+        anchor_pcd = self.crop_point_cloud(anchor_pcd, object_bounds)
+        anchor_points = np.asarray(anchor_pcd.points)
+              
+        # INFER PLACEMENT POSE
+        taxpose_output = self.infer_taxpose(action_points, anchor_points)
+        taxpose_output = np.dot(taxpose_output, np.eye(4))
         
-        anchor_pcd = self.crop_point_cloud(anchor_pcd_raw, anchor_crop_box)
-        anchor_pcd = self.filter_point_cloud(anchor_pcd)
-        anchor_pcd.points = o3d.utility.Vector3dVector(
-            np.asarray(anchor_pcd.points)/1000)
-
-        T_base2eef = self.predict_placement_pose_data['anchor']['eef_pose']
-        T_base2cam_anchor = np.dot(
-            T_base2eef, self.cam_setup['cam3_gripper']['T_eef2cam'])
-        T_base2cam_action = self.cam_setup['cam2_closeup']['T_base2cam']
-        action_pcd_tf = action_pcd.transform(T_base2cam_action)
-        anchor_pcd_tf = anchor_pcd.transform(T_base2cam_anchor)
+        place_pose = T_base2target @ taxpose_output @ np.linalg.inv(T_ee2target)
         
-        np.save(self.save_dir + "/anchor_final.npy", np.asarray(anchor_pcd_tf.points))
-
-        action_points = np.asarray(action_pcd_tf.points).astype(np.float32)
-        anchor_points = np.asarray(anchor_pcd_tf.points).astype(np.float32)
-        place_pose = self.infer_taxpose(action_points, anchor_points)
-
         return place_pose
 
     def infer_taxpose(self, action_points, anchor_points):
+        
+        # flip z axis for taxpose
+        action_points[:,2] = -action_points[:,2]
+        anchor_points[:,2] = -anchor_points[:,2]
+
+        if self.debug:
+            print(f"Action points: {action_points.shape}")
+            print(f"Anchor points: {anchor_points.shape}")
+                  
         action_points = maybe_downsample(action_points[None, ...], 2048, 'fps')
         action_points = torch.from_numpy(action_points).to('cuda')
 
         anchor_points = maybe_downsample(anchor_points[None, ...], 2048, 'fps')
         anchor_points = torch.from_numpy(anchor_points).cuda('cuda')
 
-        print(f'action_points: {action_points[:, :3]}')
-        print(f'anchor_points: {anchor_points[:, :3]}')
+        if self.debug:
+            print(f'action_points: {action_points[:, :3]}')
+            print(f'anchor_points: {anchor_points[:, :3]}')
 
         place_model = self.predict_placement_pose_data['taxpose_model']
 
         place_out = place_model(action_points, anchor_points, None, None)
         predicted_place_rel_transform = place_out['pred_T_action']
 
-        inhand_pose = self.poses['gripper_close_up_pose']
-        inhand_pose_tf = Transform3d(
-            matrix=torch.Tensor(inhand_pose.T),
-            device=predicted_place_rel_transform.device
-        ).to(predicted_place_rel_transform.device)
-        place_pose_tf = inhand_pose_tf.compose(predicted_place_rel_transform)
-        place_pose = place_pose_tf.get_matrix().T.squeeze(-1).detach().cpu().numpy()
+        # inhand_pose = self.poses['gripper_close_up_pose']
+        # inhand_pose_tf = Transform3d(
+        #     matrix=torch.Tensor(inhand_pose.T),
+        #     device=predicted_place_rel_transform.device
+        # ).to(predicted_place_rel_transform.device)
+        # place_pose_tf = inhand_pose_tf.compose(predicted_place_rel_transform)
+        # place_pose = place_pose_tf.get_matrix().T.squeeze(-1).detach().cpu().numpy()
 
         # SAVE INFERENCE DATA
         # predicted_tf = inhand_pose @ predicted_tf
-        print(f"Predicted Placement Pose: \n{np.round(place_pose,3)}")
-        np.save(self.save_dir + "/predicted_pose.npy", place_pose)
+        # print(f"Predicted Placement Pose: \n{np.round(place_pose,3)}")
+        # np.save(self.save_dir + "/predicted_pose.npy", place_pose)
 
+        predicted_tf = predicted_place_rel_transform.get_matrix().T.squeeze(-1).detach().cpu().numpy()
+        
         pred_place_points = predicted_place_rel_transform.transform_points(
             action_points)
         np.save(self.save_dir + "/pred_place_points.npy",
@@ -342,8 +295,15 @@ class ExecutePlace:
                 action_points[0].detach().cpu().numpy())
         np.save(self.save_dir + "/anchor_points.npy",
                 anchor_points[0].detach().cpu().numpy())
+               
+        # fix for flipping z
+        T = np.eye(4)
+        T[2,2] = -1
+        predicted_tf = T @ predicted_tf @ T
 
-        return place_pose
+        np.save(self.save_dir + "/predicted_tf.npy", predicted_tf)
+
+        return predicted_tf
 
     def load_taxpose_model(self, config: DictConfig):
 
@@ -408,32 +368,25 @@ class ExecutePlace:
     def collect_data(self, robot_state: str) -> None:
         """
         Collects data from cameras and the robot for a given robot state.
-
-        Args:
-            robot_state (str): The current state of the robot.
-
-        Returns:
-            None
         """
-
-        # char = input(f"Press Enter to collect data for {robot_state}...")
-        # if char == "n":
-        #     return
-
+        
         max_depth = 1500
-        if robot_state in ["gripper_close_up", "ih_camera_view"]:
+        if robot_state in ["gripper_close_up_view", "ih_camera_view"]:
             max_depth = 305  # 254 mm = 10 inches, 305 mm = 12 inches
 
         data_dir = self.save_dir
 
         # Collect data from cameras
         for cam_name in self.cam_setup.keys():
+            if (cam_name == "cam2_closeup" and robot_state == "ih_camera_view") or \
+               (cam_name == "cam3_gripper" and robot_state == "gripper_close_up_view"):
+                   continue
             print(f"Collecting data from {cam_name} with max depth {max_depth}...")
-            image = self.devices.cam_get_rgb_image(cam_name)
-            depth_data = self.devices.cam_get_raw_depth_data(
-                cam_name, max_depth=max_depth)
-            depth_image = self.devices.cam_get_colormap_depth_image(
-                cam_name, max_depth=max_depth)
+            # image = self.devices.cam_get_rgb_image(cam_name)
+            # depth_data = self.devices.cam_get_raw_depth_data(
+            #     cam_name, max_depth=max_depth)
+            # depth_image = self.devices.cam_get_colormap_depth_image(
+            #     cam_name, max_depth=max_depth)
             point_cloud = self.devices.cam_get_point_cloud(
                 cam_name, max_mm=max_depth)
 
@@ -441,20 +394,20 @@ class ExecutePlace:
             img_folder = os.path.join(data_dir, "img_data")
             if not os.path.exists(img_folder):
                 os.makedirs(img_folder)
-            cv2.imwrite(
-                os.path.join(
-                    img_folder, f"{robot_state}_{cam_name}_rgb.png"), image
-            )
-            cv2.imwrite(
-                os.path.join(
-                    img_folder, f"{robot_state}_{cam_name}_depth.png"),
-                depth_image,
-            )
-            np.save(
-                os.path.join(
-                    img_folder, f"{robot_state}_{cam_name}_depth_data.npy"),
-                depth_data,
-            )
+            # cv2.imwrite(
+            #     os.path.join(
+            #         img_folder, f"{robot_state}_{cam_name}_rgb.png"), image
+            # )
+            # cv2.imwrite(
+            #     os.path.join(
+            #         img_folder, f"{robot_state}_{cam_name}_depth.png"),
+            #     depth_image,
+            # )
+            # np.save(
+            #     os.path.join(
+            #         img_folder, f"{robot_state}_{cam_name}_depth_data.npy"),
+            #     depth_data,
+            # )
 
             # save point cloud in pcd folder
             pcd_folder = os.path.join(data_dir, "pcd_data")
@@ -467,8 +420,7 @@ class ExecutePlace:
             )
 
             # get data for prediction
-            target_dict_list = [self.predict_board_pose_data,
-                                self.predict_placement_pose_data["action"],
+            target_dict_list = [self.predict_placement_pose_data["action"],
                                 self.predict_placement_pose_data["anchor"]]
 
             for target_dict in target_dict_list:
@@ -476,10 +428,10 @@ class ExecutePlace:
                     for key in target_dict.keys():
                         if key == "pcd":
                             target_dict[key] = point_cloud
-                        if key == "rgb":
-                            target_dict[key] = image
-                        if key == "depth_data":
-                            target_dict[key] = depth_data
+                        # if key == "rgb":
+                        #     target_dict[key] = image
+                        # if key == "depth_data":
+                        #     target_dict[key] = depth_data
 
         # Collect data from robot
         eef_pose = self.devices.robot_get_eef_pose()
@@ -490,26 +442,40 @@ class ExecutePlace:
                 f"{robot_state}_pose.npy"), eef_pose)
 
         # get data for prediction
-        target_dict_list = [self.predict_board_pose_data,
-                            self.predict_placement_pose_data["action"],
+        target_dict_list = [self.predict_placement_pose_data["action"],
                             self.predict_placement_pose_data["anchor"]]
 
         for target_dict in target_dict_list:
-            if target_dict["camera"] == cam_name and target_dict["view"] == robot_state:
+            if target_dict["view"] == robot_state:
                 for key in target_dict.keys():
                     if key == "eef_pose":
                         target_dict[key] = eef_pose
+                        print(f"Setting {key} for {cam_name} and {robot_state}...")
+
+    def crop_points(self, points, crop_box) -> np.ndarray:
+
+        mask = np.logical_and.reduce(
+            (points[:, 0] >= crop_box['min'][0],
+                points[:, 0] <= crop_box['max'][0],
+                points[:, 1] >= crop_box['min'][1],
+                points[:, 1] <= crop_box['max'][1],
+                points[:, 2] >= crop_box['min'][2],
+                points[:, 2] <= crop_box['max'][2])
+        )
+        points = points[mask]
+
+        return points
 
     def crop_point_cloud(self, pcd: o3d.geometry.PointCloud, crop_box: Dict[str, float]) -> o3d.geometry.PointCloud:
 
         points = np.asarray(pcd.points)
         mask = np.logical_and.reduce(
-            (points[:, 0] >= crop_box['min_bound'][0],
-             points[:, 0] <= crop_box['max_bound'][0],
-             points[:, 1] >= crop_box['min_bound'][1],
-             points[:, 1] <= crop_box['max_bound'][1],
-             points[:, 2] >= crop_box['min_bound'][2],
-             points[:, 2] <= crop_box['max_bound'][2])
+            (points[:, 0] >= crop_box['min'][0],
+             points[:, 0] <= crop_box['max'][0],
+             points[:, 1] >= crop_box['min'][1],
+             points[:, 1] <= crop_box['max'][1],
+             points[:, 2] >= crop_box['min'][2],
+             points[:, 2] <= crop_box['max'][2])
         )
         points = points[mask]
 
@@ -519,5 +485,128 @@ class ExecutePlace:
         return pcd_t
 
     def filter_point_cloud(self, pcd: o3d.geometry.PointCloud) -> o3d.geometry.PointCloud:
-        pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
+        pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=20, std_ratio=1.0)
         return pcd
+
+    def validate_execute(self) -> None:
+
+        print(f"EXECUTING PLACE FOR {self.object.upper()}")
+
+        print("####################################################################")
+        print("1. HOME POSE")
+        print("####################################################################")
+
+        self.devices.robot_move_to_pose(self.poses['home_pose'])
+        
+        print("####################################################################")
+        print("2. GRASP OBJECT")
+        print("####################################################################")
+
+        print("Open gripper")
+
+        self.devices.gripper_open()
+        time.sleep(0.5)
+        
+        self.devices.robot_move_to_pose(self.poses['target_pose'], 1, 1)
+
+
+        input("Press Enter to close gripper when object inside gripper...")
+
+        self.devices.gripper_close()
+        time.sleep(0.5)
+        
+        ground_truth = self.devices.robot_get_eef_pose()
+        time.sleep(0.5)
+
+        pre_placement_gt = np.copy(ground_truth)
+        pre_placement_gt[2, 3] = pre_placement_gt[2,3] + 0.040
+        self.devices.robot_move_to_pose(pre_placement_gt, 1, 1)
+        
+        retry = True
+        retry_ctr = 0
+        
+        while retry:
+            self.devices.robot_move_to_pose(self.poses['home_pose'], 1, 1)
+
+            print("####################################################################")
+            print("3. GRIPPER CLOSE UP VIEW")
+            print("####################################################################")
+            
+            print(f"Moving to object in hand close up pose...")
+            T_base2camera = self.cam_setup[self.cfg.training.action.camera]["T_base2cam"]
+            distance = 0.400
+            T_camera2gripper = np.array([
+                [1,  0,  0, 0],
+                [0, -1,  0, 0],
+                [0,  0, -1, distance],
+                [0,  0,  0, 1]])
+            T_base2gripper = np.dot(T_base2camera, T_camera2gripper)
+            gripper_close_up_pose = T_base2gripper
+
+            self.devices.robot_move_to_pose(gripper_close_up_pose, 1, 1)
+            self.collect_data("gripper_close_up_view")
+                    
+            print("####################################################################")
+            print("3. IN-HAND CAMERA VIEW")
+            print("####################################################################")
+            
+            self.devices.robot_move_to_pose(self.poses['home_pose'], 1, 1)
+            
+            print(f"Moving to in-hand camera view pose...")
+            self.devices.robot_move_to_pose(self.poses['ih_camera_view_pose'], 1, 1)
+            self.collect_data("ih_camera_view")
+            breakpoint()
+            print("####################################################################")
+            print("5. PREDICTING PLACEMENT POSE")
+            print("####################################################################")
+            
+            placement_pose = self.infer_placement_pose()
+            pre_placement_pose = placement_pose.copy()
+            pre_placement_pose[2, 3] = placement_pose[2, 3] + 0.015
+            
+            # save ground truth and predicted placement pose
+            np.save(self.save_dir + "/pose_data/ground_truth.npy", ground_truth)
+            np.save(self.save_dir + "/pose_data/placement_pose.npy", placement_pose)
+            
+            print("####################################################################")
+            print("6. PERFORM PLACEMENT")
+            print("####################################################################")
+            
+            print("Moving to pre-target pose...")
+            
+            pre_target_pose = self.poses['target_pose'].copy()
+            pre_target_pose[2, 3] = self.poses['home_pose'][2, 3]
+            self.devices.robot_move_to_pose(pre_target_pose, 1, 1)
+            
+            input("Press Enter to continue...")
+            
+            self.devices.robot_move_to_pose(pre_placement_pose)
+                        
+            rot_error = ((ground_truth) @ np.linalg.inv(placement_pose))[:3,:3]
+            euler = R.from_matrix(rot_error).as_euler('xyz', degrees=True)
+            rot_error = np.round(np.max(np.abs(euler)),2)
+            t_error = np.linalg.norm(ground_truth[:3,3] - placement_pose[:3,3])*1000
+            t_error2 = np.linalg.norm(ground_truth[:2,3] - placement_pose[:2,3])*1000
+            print(f"\nRotation error: {rot_error}\u00B0,\tTranslation error: {np.round(t_error,2)}, {np.round(t_error2,2)} mm\n")
+            
+            retry_input = input("Press 'r' to retry or Enter to continue...")
+            retry = retry_input == 'r'
+            if retry:
+                retry_ctr += 1
+                self.save_dir = self.save_dir + "_r" + str(retry_ctr)
+                if not os.path.exists(self.save_dir):
+                    os.makedirs(self.save_dir)
+                    print(f"Save directory: {self.save_dir}")
+            
+        
+        self.devices.robot_move_to_pose(placement_pose, 0.05, 0.05)
+        
+        print("####################################################################")
+        print("7. FINISHING UP")
+        print("####################################################################")
+        
+        self.devices.gripper_open()
+        time.sleep(0.5)
+        self.devices.robot_move_to_pose(self.poses['home_pose'])
+
+        print(f"\033[1m\033[3m{self.object.upper()} PLACEMENT DONE!\033[0m")
