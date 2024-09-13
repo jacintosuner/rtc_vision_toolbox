@@ -3,6 +3,7 @@ import base64
 import math
 import struct
 import sys
+import threading
 import time
 from ctypes import POINTER, c_float, c_uint32, cast, pointer
 from datetime import datetime
@@ -40,10 +41,18 @@ class ZedRos:
     __depth_mode    :str = None
     __camera_type   :str = None # 'zedx' or 'zedxm'
 
-    def __init__(self, camera_node: str, camera_type: str, rosmaster_ip='localhost', rosmaster_port=9090, depth_mode='igev'):
+    def __init__(self, camera_node: str, 
+                 camera_type: str, 
+                 rosmaster_ip='localhost', 
+                 rosmaster_port=9090, 
+                 depth_mode='igev',
+                 debug = False):
         """
         Initializes the Camera object.
         """
+        
+        self.debug = debug
+        
         # initialize ros client
         self.__ros_client = roslibpy.Ros(host=rosmaster_ip, port=rosmaster_port)
         self.__ros_client.run()
@@ -61,11 +70,22 @@ class ZedRos:
         self.__camera_type = camera_type
         self.__camera_node = camera_node
         self.__depth_mode = depth_mode
+        # self.__stereo_ros = None
+        
+        # self.__stereo_thread = threading.Thread(target=self.__ros_sub_stereo)
+        # self.__stereo_thread.start()
 
     def __del__(self):
         # self.__ros_client.terminate()
         pass
-
+    
+    # def __ros_sub_stereo(self):
+    #     image_subscriber = roslibpy.Topic(self.__ros_client, '/'+self.__camera_node + "/stereo/image_rect_color", 'sensor_msgs/Image')        
+    #     image_subscriber.subscribe(self.__stereo_callback)           
+    
+    # def __stereo_callback(self, message):
+    #     self.__stereo_ros = message
+    
     def get_rgb_image(self, use_new_frame: bool=True) -> Union[Optional[np.array], Any]:
         """
         Captures and returns an RGB image from the camera.
@@ -76,7 +96,8 @@ class ZedRos:
         Returns:
             color_image (numpy.ndarray): RGB image captured from the camera.
         """
-        color_image = self.__get_image_from_rostopic('/rgb/image_rect_color')
+        # color_image = self.__get_image_from_rostopic('/rgb/image_rect_color')
+        color_image = self.__get_compressedimage_from_rostopic('/rgb/image_rect_color/compressed')
         color_image = np.array(color_image[:,:,0:3])
 
         return color_image
@@ -310,11 +331,10 @@ class ZedRos:
                 return np.float32, 4
             else:
                 raise TypeError(f'Unsupported encoding: {encoding}')
-        time_stamp_1 = time.time()        
-        image_subscriber = roslibpy.Topic(self.__ros_client, '/'+self.__camera_node + topic_name, 'sensor_msgs/Image')        
-
+        
         def callback(img_msg):
-            nonlocal image
+            print("Got image!")
+            nonlocal image, image_subscriber
             img_msg['data'] = base64.b64decode(img_msg['data'])
             img_msg['data'] = np.frombuffer(img_msg['data'], dtype=np.uint8)
             dtype, n_channels = encoding_to_dtype_with_channels(img_msg['encoding'])
@@ -337,21 +357,72 @@ class ZedRos:
                 im = im.byteswap().newbyteorder()
 
             image = im
+            image_subscriber.unsubscribe()        
 
-        time_stamp_2 = time.time()
+        # if topic_name != '/stereo/image_rect_color':
+        image_subscriber = roslibpy.Topic(self.__ros_client, self.__camera_node + topic_name, 'sensor_msgs/Image')        
+
         image :np.ndarray = None
-        ctr = 0
+        image_subscriber.subscribe(lambda message: callback(message))
+        time_stamp_2 = time.time()
         while image is None:
-            ctr += 1
-            image_subscriber.subscribe(lambda message: callback(message))
+            continue
+            # image_subscriber.subscribe(lambda message: callback(message))
 
         time_stamp_3 = time.time()
+        
+        if self.debug:
+            print(f"Time taken to get image: {time_stamp_3 - time_stamp_2}s")
 
-        print(f"Time taken to get image: {time_stamp_3 - time_stamp_2}s")
+        # image_subscriber.unsubscribe()        
+    
+        # else:
+        #     self.__stereo_ros = None
+        #     time_stamp_1 = time.time()        
+        #     while self.__stereo_ros is None:
+        #         pass
+        #     time_stamp_2 = time.time()
+        #     print(f"Time taken to get image: {time_stamp_2 - time_stamp_1}s")
 
-        image_subscriber.unsubscribe()        
-
+        #     image :np.ndarray = None
+        #     callback(self.__stereo_ros)
+            
         return image
+
+    def __get_compressedimage_from_rostopic(self, topic_name: str):
+        """
+        Get image from ROS topic.
+        Based on cv_bridge implementation
+        https://github.com/ros-perception/vision_opencv/blob/a34a0c261984e4ab71f267d093f6a48820801d80/cv_bridge/python/cv_bridge/core.py#L147
+        """
+        
+        def callback(img_msg):
+            print("Got image!")
+            nonlocal image, image_subscriber
+            img_msg['data'] = base64.b64decode(img_msg['data'])
+            img_msg['data'] = np.frombuffer(img_msg['data'], dtype=np.uint8)
+            
+            img_buf = np.ndarray(shape=(1, len(img_msg['data'])),
+                                 dtype=np.uint8, buffer=img_msg['data'])
+            
+            image = cv2.imdecode(img_buf, cv2.IMREAD_UNCHANGED)
+            image_subscriber.unsubscribe()
+
+        image_subscriber = roslibpy.Topic(self.__ros_client, self.__camera_node + topic_name, 'sensor_msgs/CompressedImage')        
+
+        image :np.ndarray = None
+        image_subscriber.subscribe(lambda message: callback(message))
+        time_stamp_2 = time.time()
+        while image is None:
+            continue
+
+        time_stamp_3 = time.time()
+        
+        if self.debug:
+            print(f"Time taken to get image: {time_stamp_3 - time_stamp_2}s")
+            
+        return image
+
 
     def __get_pointcloud_from_rostopic(self, topic_name: str):
         """
@@ -549,7 +620,8 @@ class ZedRos:
         """
         left_image, right_image = self.__get_stereo_images()
 
-        print("::::::starting IGEV estimation::::::")
+        if self.debug:
+            print("::::::starting IGEV estimation::::::")
 
         args = self.__get_default_IGEV_args()        
         model = torch.nn.DataParallel(IGEVStereo(args), device_ids=[0])
@@ -582,7 +654,8 @@ class ZedRos:
 
             igev_disp, disp_prob = model(image1, image2, iters=32, test_mode=True)
             end = time.time()
-            print("torch inference time: ", end - start)
+            if self.debug:
+                print("torch inference time: ", end - start)
             igev_disp = igev_disp.cpu().numpy()
             igev_disp = padder.unpad(igev_disp)
             igev_disp = igev_disp.squeeze()
@@ -600,10 +673,10 @@ class ZedRos:
             
             np.save("disp_prob.npy", disp_prob)
             
-            print("::::::IGEV estimation finished::::::")
-            
-            print("disp_prob: ", disp_prob.shape)
-            print("IGEV disp shape: ", igev_disp.shape)
+            if self.debug:
+                print("::::::IGEV estimation finished::::::")                
+                print("disp_prob: ", disp_prob.shape)
+                print("IGEV disp shape: ", igev_disp.shape)
 
             return igev_disp
 
@@ -659,7 +732,8 @@ class ZedRos:
         """
         Get stereo image from ROS topic.
         """
-        stereo_image = self.__get_image_from_rostopic('/stereo/image_rect_color')
+        # stereo_image = self.__get_image_from_rostopic('/stereo/image_rect_color')
+        stereo_image = self.__get_compressedimage_from_rostopic('/stereo/image_rect_color/compressed')        
 
         # GET RIGHT AND LEFT IMAGES
         left_image = stereo_image[:, :int(stereo_image.shape[1]/2)]
