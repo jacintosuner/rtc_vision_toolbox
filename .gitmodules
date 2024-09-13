@@ -8,4 +8,5 @@
 
 [submodule "taxpose"]
 	path = models/taxpose
-	url = https://github.com/r-pad/taxpose.git
+	url = https://github.com/cmu-mfi/taxpose.git
+	branch = rtc-taxpose
