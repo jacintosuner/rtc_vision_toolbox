@@ -71,7 +71,7 @@ class ROSRobot:
         self.latest_eef_pose[:3,:3] = rotation
         self.latest_eef_pose[:3,3] = translation
 
-    def move_to_pose(self, position, orientation):
+    def move_to_pose(self, position, orientation, max_velocity_scaling_factor=0.3, max_acceleration_scaling_factor=0.3):
         
         position = np.array(position)
         orientation = np.array(orientation)
@@ -91,7 +91,10 @@ class ROSRobot:
         try:
             enable_request = roslibpy.ServiceRequest({})
             enable_response = self.__enable_robot_service.call(enable_request)
-            request = roslibpy.ServiceRequest({'pose': pose_serial, 'base_frame': 'base_link'})
+            request = roslibpy.ServiceRequest({'pose': pose_serial, 
+                                               'base_frame': 'base_link',
+                                               'max_velocity_scaling_factor': max_velocity_scaling_factor,
+                                               'max_acceleration_scaling_factor': max_acceleration_scaling_factor})
             response = self.__move_to_pose_service.call(request)            
             return True
         
