@@ -98,6 +98,7 @@ if __name__ == "__main__":
     
     # test_taxpose_wp(place_execute) 
     # test_taxpose(place_execute)
-    # place_execute.validate_execute()
-    place_execute.execute()
+    place_execute.validate_execute()
+    # place_execute.execute()
+    # place_execute.loop_execute()
     

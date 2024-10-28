@@ -392,10 +392,14 @@ class LearnPlace:
             
             T_base2placeeef = np.load(os.path.join(teach_pose_dir, f"demo{demo}_placement_pose.npy"))
             T_base2place = np.dot(T_base2placeeef, T_ee2target)
+            # breakpoint()
+            # np.save(os.path.join('/home/mfi/repos/rtc_vision_toolbox/test', f"demo{demo}_anchor_og.npy"), np.asarray(anchor_pcd.points))
 
             # transform anchor pcd in target pose frame for easy cropping
             crop_tf = np.dot(np.linalg.inv(T_base2target), T_base2cam)
             anchor_pcd = anchor_pcd.transform(crop_tf)
+            
+            # np.save(os.path.join('/home/mfi/repos/rtc_vision_toolbox/test', f"demo{demo}_anchor.npy"), np.asarray(anchor_pcd.points))
 
             # crop_points
             anchor_bounds = cfg.training.anchor.object_bounds
@@ -427,8 +431,14 @@ class LearnPlace:
                 action_pcd = action_pcd.transform(action_tf)
                 action_pcd = action_pcd.transform(np.linalg.inv(place_tf))
                 
+                # crop_points
+                action_bounds = cfg.training.action.object_bounds
+                object_bounds = {
+                    'min': np.array(action_bounds.min)/1000,
+                    'max': np.array(action_bounds.max)/1000
+                }
                 action_points = np.asarray(action_pcd.points)
-                action_points = action_points[action_points[:, 2] > self.cfg.training.action.object_bounds.min[2]/1000]     
+                action_points = self.__crop_points(action_points, object_bounds)
                 action_points_list.append(action_points)
             
             # save data to train or test dir

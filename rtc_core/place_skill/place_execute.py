@@ -11,6 +11,7 @@ import numpy as np
 import open3d as o3d
 import torch
 from hydra.core.global_hydra import GlobalHydra
+from inputimeout import TimeoutOccurred, inputimeout
 from omegaconf import DictConfig, OmegaConf
 from pytorch3d.transforms import Transform3d
 from scipy.spatial.transform import Rotation as R
@@ -104,7 +105,7 @@ class ExecutePlace:
         print("1. HOME POSE")
         print("####################################################################")
 
-        self.devices.robot_move_to_pose(self.poses['home_pose'])
+        self.devices.robot_move_to_pose(self.poses['home_pose'], 1, 1)
         
         print("####################################################################")
         print("2. GRASP OBJECT")
@@ -139,7 +140,7 @@ class ExecutePlace:
             T_base2gripper = np.dot(T_base2camera, T_camera2gripper)
             gripper_close_up_pose = T_base2gripper
 
-            self.devices.robot_move_to_pose(gripper_close_up_pose)
+            self.devices.robot_move_to_pose(gripper_close_up_pose, 1, 1)
             self.collect_data("gripper_close_up_view")
                     
             print("####################################################################")
@@ -149,7 +150,8 @@ class ExecutePlace:
             self.devices.robot_move_to_pose(self.poses['home_pose'])
             
             print(f"Moving to in-hand camera view pose...")
-            self.devices.robot_move_to_pose(self.poses['ih_camera_view_pose'])
+            self.devices.robot_move_to_pose(self.poses['ih_camera_view_pose'], 1, 1)
+            
             self.collect_data("ih_camera_view")
 
             print("####################################################################")
@@ -158,7 +160,7 @@ class ExecutePlace:
             
             placement_pose = self.infer_placement_pose()
             pre_placement_pose = placement_pose.copy()
-            pre_placement_pose[2, 3] = placement_pose[2, 3] + 0.015
+            pre_placement_pose[2, 3] = placement_pose[2, 3] + 0.03
             
             np.save(self.save_dir + "/pose_data/placement_pose.npy", placement_pose)
             
@@ -170,11 +172,11 @@ class ExecutePlace:
             
             pre_target_pose = self.poses['target_pose'].copy()
             pre_target_pose[2, 3] = self.poses['home_pose'][2, 3]
-            self.devices.robot_move_to_pose(pre_target_pose)
+            self.devices.robot_move_to_pose(pre_target_pose, 1, 1)
             
             input("Press Enter to continue...")
             
-            self.devices.robot_move_to_pose(pre_placement_pose)
+            self.devices.robot_move_to_pose(pre_placement_pose, 1, 1)
         
             retry_input = input("Press 'r' to retry or Enter to continue...")
             retry = retry_input == 'r'
@@ -185,7 +187,7 @@ class ExecutePlace:
                     os.makedirs(self.save_dir)
                     print(f"Save directory: {self.save_dir}")
             
-        self.devices.robot_move_to_pose(placement_pose)
+        self.devices.robot_move_to_pose(placement_pose, 0.05, 0.05)
         
         print("####################################################################")
         print("7. FINISHING UP")
@@ -193,7 +195,7 @@ class ExecutePlace:
         
         self.devices.gripper_open()
         time.sleep(0.5)
-        self.devices.robot_move_to_pose(self.poses['home_pose'])
+        self.devices.robot_move_to_pose(self.poses['home_pose'], 1, 1)
 
         print(f"\033[1m\033[3m{self.object.upper()} PLACEMENT DONE!\033[0m")
 
@@ -217,6 +219,8 @@ class ExecutePlace:
         
         action_points = np.asarray(action_pcd.points)
         action_points = action_points[action_points[:, 2] > 0]
+        action_points = action_points[action_points[:, 0] < 0.1]
+        action_points = action_points[action_points[:, 0] > -0.1]
         
         # PREPARE DATA FOR INFERENCE: ANCHOR POINTCLOUD
         anchor_pcd = self.predict_placement_pose_data['anchor']['pcd']
@@ -235,9 +239,9 @@ class ExecutePlace:
             'min': np.array(anchor_bounds.min)/1000,
             'max': np.array(anchor_bounds.max)/1000
         }
-        np.save(self.save_dir + "/anchortest.npy", np.asarray(anchor_pcd.points))
         anchor_pcd = self.crop_point_cloud(anchor_pcd, object_bounds)
         anchor_points = np.asarray(anchor_pcd.points)
+        np.save(self.save_dir + "/anchortest.npy", np.asarray(anchor_pcd.points))
               
         # INFER PLACEMENT POSE
         taxpose_output = self.infer_taxpose(action_points, anchor_points)
@@ -535,6 +539,11 @@ class ExecutePlace:
             print(f"Moving to object in hand close up pose...")
             T_base2camera = self.cam_setup[self.cfg.training.action.camera]["T_base2cam"]
             distance = 0.400
+            
+            if 'viewing_distance' in self.cfg.training.action.keys():
+                distance = self.cfg.training.action.viewing_distance \
+                           + 0.212 # 0.212 is the distance from the flange to the end effector tip             
+            
             T_camera2gripper = np.array([
                 [1,  0,  0, 0],
                 [0, -1,  0, 0],
@@ -554,8 +563,19 @@ class ExecutePlace:
             
             print(f"Moving to in-hand camera view pose...")
             self.devices.robot_move_to_pose(self.poses['ih_camera_view_pose'], 1, 1)
+            condition = input("VARIABLE ANCHOR POSE? (y/n) ")
+            if (condition == 'y'):
+                # breakpoint()
+                T_eef2camera = np.load(os.path.join(self.project_dir, 'data/demonstrations/09-11-wp/calib_data/T_eef2cam3_new.npy'))
+                T_eef2camera[2,3] = 0
+                ih_camera_view_pose = self.devices.robot_get_eef_pose()
+                pre_target_pose = ih_camera_view_pose @ T_eef2camera
+                self.poses['target_pose'] = np.copy(pre_target_pose)
+                self.poses['target_pose'][2, 3] = pre_target_pose[2, 3] - 0.04
+                # breakpoint()            
+            
             self.collect_data("ih_camera_view")
-            breakpoint()
+            # breakpoint()
             print("####################################################################")
             print("5. PREDICTING PLACEMENT POSE")
             print("####################################################################")
@@ -610,3 +630,137 @@ class ExecutePlace:
         self.devices.robot_move_to_pose(self.poses['home_pose'])
 
         print(f"\033[1m\033[3m{self.object.upper()} PLACEMENT DONE!\033[0m")
+        
+    def loop_execute(self) -> None:
+        while True:
+            print(f"EXECUTING PLACE FOR {self.object.upper()}")
+
+            now = datetime.datetime.now().strftime("%m%d_%H%M")
+            self.save_dir = os.path.join(self.data_dir, f"execute_data/{now}")
+
+            print("####################################################################")
+            print("1. HOME POSE")
+            print("####################################################################")
+
+            self.devices.robot_move_to_pose(self.poses['home_pose'])
+            
+            print("####################################################################")
+            print("2. GRASP OBJECT")
+            print("####################################################################")
+
+            print("Open gripper")
+
+            self.devices.gripper_open()
+            time.sleep(0.5)
+            
+            self.devices.robot_move_to_pose(self.poses['target_pose'], 1, 1)
+            
+            # pause 2 second for input
+            try:
+                randomize_grip = inputimeout("Randomize grip? (y/n): ", timeout=2)
+            except TimeoutOccurred:
+                randomize_grip = "n"
+                
+            if randomize_grip == "y":
+                current_pose = self.devices.robot_get_eef_pose()
+                goal_pose = current_pose.copy()
+                rot = R.from_matrix(goal_pose[:3,:3]).as_quat()
+                random_rot = np.random.uniform(0.02, 0.03) * np.random.choice([-1, 1])
+                rot[2] = random_rot
+                goal_pose[:3,:3] = R.from_quat(rot).as_matrix()
+                self.devices.robot_move_to_pose(goal_pose, 0.05, 0.05)
+                var_deg = R.from_matrix(goal_pose[:3,:3]).as_euler('xyz', degrees=True)[1]- R.from_matrix(current_pose[:3,:3]).as_euler('xyz', degrees=True)[1]
+                print(f"Added rotational variance of : {np.round(var_deg)}\u00B0")
+
+            self.devices.gripper_close()
+            time.sleep(0.5)
+            
+            ground_truth = self.devices.robot_get_eef_pose()
+            time.sleep(0.5)
+
+            pre_placement_gt = np.copy(ground_truth)
+            pre_placement_gt[2, 3] = pre_placement_gt[2,3] + 0.040
+            self.devices.robot_move_to_pose(pre_placement_gt, 1, 1)
+            
+            self.devices.robot_move_to_pose(self.poses['home_pose'], 1, 1)
+
+            print("####################################################################")
+            print("3. GRIPPER CLOSE UP VIEW")
+            print("####################################################################")
+            
+            print(f"Moving to object in hand close up pose...")
+            T_base2camera = self.cam_setup[self.cfg.training.action.camera]["T_base2cam"]
+            distance = 0.400
+            
+            if 'viewing_distance' in self.cfg.training.action.keys():
+                distance = self.cfg.training.action.viewing_distance \
+                        + 0.212 # 0.212 is the distance from the flange to the end effector tip             
+            
+            T_camera2gripper = np.array([
+                [1,  0,  0, 0],
+                [0, -1,  0, 0],
+                [0,  0, -1, distance],
+                [0,  0,  0, 1]])
+            T_base2gripper = np.dot(T_base2camera, T_camera2gripper)
+            gripper_close_up_pose = T_base2gripper
+
+            self.devices.robot_move_to_pose(gripper_close_up_pose, 1, 1)
+            self.collect_data("gripper_close_up_view")
+                    
+            print("####################################################################")
+            print("3. IN-HAND CAMERA VIEW")
+            print("####################################################################")
+            
+            self.devices.robot_move_to_pose(self.poses['home_pose'], 1, 1)
+            
+            print(f"Moving to in-hand camera view pose...")
+            self.devices.robot_move_to_pose(self.poses['ih_camera_view_pose'], 1, 1)
+            self.collect_data("ih_camera_view")
+            print("####################################################################")
+            print("5. PREDICTING PLACEMENT POSE")
+            print("####################################################################")
+            
+            placement_pose = self.infer_placement_pose()
+            pre_placement_pose = placement_pose.copy()
+            pre_placement_pose[2, 3] = placement_pose[2, 3] + 0.015
+            
+            # save ground truth and predicted placement pose
+            np.save(self.save_dir + "/pose_data/ground_truth.npy", ground_truth)
+            np.save(self.save_dir + "/pose_data/placement_pose.npy", placement_pose)
+            
+            print("####################################################################")
+            print("6. PERFORM PLACEMENT")
+            print("####################################################################")
+            
+            print("Moving to pre-target pose...")
+            
+            pre_target_pose = self.poses['target_pose'].copy()
+            pre_target_pose[2, 3] = self.poses['home_pose'][2, 3]
+            self.devices.robot_move_to_pose(pre_target_pose, 1, 1)
+            
+            time.sleep(1)
+            
+            self.devices.robot_move_to_pose(pre_placement_pose)
+                        
+            rot_error = ((ground_truth) @ np.linalg.inv(placement_pose))[:3,:3]
+            euler = R.from_matrix(rot_error).as_euler('xyz', degrees=True)
+            rot_error = np.round(np.max(np.abs(euler)),2)
+            t_error = np.linalg.norm(ground_truth[:3,3] - placement_pose[:3,3])*1000
+            t_error2 = np.linalg.norm(ground_truth[:2,3] - placement_pose[:2,3])*1000
+            print(f"\nRotation error: {rot_error}\u00B0,\tTranslation error: {np.round(t_error,2)}, {np.round(t_error2,2)} mm\n")
+            
+            time.sleep(1)
+            if randomize_grip == "y":
+                input("Press Enter to continue...")                
+            
+            self.devices.robot_move_to_pose(placement_pose, 0.05, 0.05)
+            
+            print("####################################################################")
+            print("7. FINISHING UP")
+            print("####################################################################")
+            
+            self.devices.gripper_open()
+            time.sleep(0.5)
+            self.devices.robot_move_to_pose(self.poses['home_pose'])
+
+            print(f"\033[1m\033[3m{self.object.upper()} PLACEMENT DONE!\033[0m")

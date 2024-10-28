@@ -1,0 +1,1 @@
+python scripts/place_execute.py --config ../data/demonstrations/09-08-dsub/place_object

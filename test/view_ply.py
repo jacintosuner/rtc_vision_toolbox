@@ -87,10 +87,12 @@ def plot_multi_np(plist):
     fig.show()
     
 # pcd = o3d.io.read_point_cloud('/home/mfi/repos/rtc_vision_toolbox/data/demonstrations/09-11-usb/teach_data/pcd_data/demo0_ih_camera_view0_cam3_gripper_pointcloud.ply')
-pcd = o3d.io.read_point_cloud('/home/mfi/repos/rtc_vision_toolbox/camera/rs_ros/points_came_igev_0911_1630.ply')
+# pcd = o3d.io.read_point_cloud('/home/mfi/repos/rtc_vision_toolbox/camera/rs_ros/points_came_igev_0911_1630.ply')
 # pcd = o3d.io.read_point_cloud('/home/mfi/repos/rtc_vision_toolbox/data/demonstrations/09-08-dsub/teach_data/pcd_data/demo0_gripper_close_up_view0_cam2_closeup_pointcloud.ply')
 # pcd = pcd.uniform_down_sample(35)
-points = np.asarray(pcd.points)
-points = points[np.where(points[:, 2] < 200)]
-points[:,2] = -points[:,2]
+# points = np.asarray(pcd.points)
+
+points = np.load("/home/mfi/repos/rtc_vision_toolbox/test/demo0_anchor_og.npy")
+# points = points[np.where(points[:, 2] < 200)]
+# points[:,2] = -points[:,2]
 plot_multi_np([points])

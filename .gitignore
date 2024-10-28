@@ -3,6 +3,7 @@ Log/
 orbbec_ros/
 .vscode/
 data/
+test/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

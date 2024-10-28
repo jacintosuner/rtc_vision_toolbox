@@ -115,7 +115,7 @@ class TeachPlace:
 
             print("Pulling up action object...")
             pre_placement_pose = np.copy(placement_pose)
-            pre_placement_pose[2, 3] = pre_placement_pose[2,3] + 0.020
+            pre_placement_pose[2, 3] = pre_placement_pose[2,3] + 0.025
             self.devices.robot_move_to_pose(pre_placement_pose)
             
             print("####################################################################")
@@ -136,6 +136,9 @@ class TeachPlace:
             if self.ih_view_pose is not None:
                 ih_camera_view_pose = self.ih_view_pose
                 print("Using previous in-hand camera view pose")
+            #check if ih_camera_view_pose.npy file exists in data directory
+            elif os.path.exists(os.path.join(self.data_dir, "poses", "ih_camera_view_pose.npy")):
+                ih_camera_view_pose = np.load(os.path.join(self.data_dir, "poses", "ih_camera_view_pose.npy"))
             else:
                 self.ih_view_pose = ih_camera_view_pose         
                 print("Using new in-hand camera view pose")       
@@ -230,6 +233,7 @@ class TeachPlace:
             is_good = input("Looks good? Press 'n' to place manually (y/n): ")
             if is_good == "n":
                 input("Move robot to placement pose and press Enter to continue...")
+                self.current_demo -= 1
             elif is_good == "y":
                 self.devices.robot_move_to_pose(placement_pose)
             else:

@@ -1,0 +1,1 @@
+python scripts/place_execute.py --config ../data/demonstrations/09-11-wp/place_object
