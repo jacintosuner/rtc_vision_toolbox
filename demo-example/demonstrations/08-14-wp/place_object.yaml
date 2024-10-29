@@ -1,0 +1,120 @@
+
+defaults:
+  - _self_
+
+object: "wp-male"
+num_demos: 5
+data_dir: data/demonstrations/08-14-wp
+debug: False
+
+devices:
+  cameras:
+    cam2_closeup:
+      class: ZedRos
+      type: on_base
+      init_args:
+        camera_node: /cam2/zed_cam2
+        camera_type: zedxm
+        rosmaster_ip: 10.0.0.101
+        rosmaster_port: 9090      
+      setup:
+        T_base2cam: data/calibration_data/zed/T_base2cam2.npy
+
+    cam3_gripper:
+      class: RsRos
+      type: on_hand
+      init_args:
+        camera_node: /camera/realsense2_camera
+        # camera_node: /yk_builder/wrist_camera/realsense2_camera
+        camera_type: d405
+        rosmaster_ip: 192.168.1.2
+        rosmaster_port: 9090
+      setup:
+        T_eef2cam: data/demonstrations/08-14-wp/calib_data/T_eef2cam3_new.npy
+
+  robot:
+    class: ROSRobot
+    init_args:
+      robot_name: yk_builder
+      rosmaster_ip: 192.168.1.2
+      rosmaster_port: 9090
+
+  gripper:
+    class: RobotiqGripper
+    init_args:
+      port: /dev/ttyUSB0
+
+training:
+  num_demos: ${num_demos}
+  test_ratio: 0.20
+  action:
+    class_idx: 0
+    camera: cam2_closeup
+    view: gripper_close_up_view
+    object_bounds:
+      min: [-200, -60, 0.0]
+      max: [200, 60, 200]
+    view_variations:
+      count: 3
+      position: 0.01
+      orientation: 5.0
+  anchor:
+    class_idx: 1
+    camera: cam3_gripper
+    view: ih_camera_view
+    object_bounds:
+      min: [-60, -30, 0]
+      max: [40, 40, 100]
+    view_variations:
+      count: 1
+      position: 0.01
+      orientation: 5.0
+  target:
+    view: placement
+  model_config:
+    config_path: 'models/taxpose/configs'
+    config_name: 'commands/mfi/waterproof/train_taxpose_08-14-wp_place.yaml'
+
+execution:
+  action:
+    camera: ${training.action.camera}
+    view: ${training.action.view}
+    object_bounds: ${training.action.object_bounds}
+  anchor:
+    camera: ${training.anchor.camera}
+    view: ${training.anchor.view}
+    object_bounds: ${training.anchor.object_bounds}
+  target: ${training.target}
+  model_config: 
+    config_path: ${training.model_config.config_path}
+    config_name: 'commands/mfi/waterproof/eval_taxpose_08-11-wp_place.yaml'
+
+
+
+
+
+# execution:
+#   action:
+#     camera: ${training.action.camera}
+#     camera_type: on_base
+#     view: ${training.action.view}
+#     crop_box:
+#       min_bound: [-200, -60, 0.0]
+#       max_bound: [200, 60, 200]
+#   anchor:
+#     camera: ${training.anchor.camera}
+#     camera_type: on_hand
+#     view: ${training.anchor.view}
+#     crop_box:
+#       min_bound: [-55, -28, 150]
+#       max_bound: [55, 25, 300]
+#   target:
+#     view: ${training.target.view}
+#     bias: 
+#     - [0, 0, 0, 0.000]
+#     - [0, 0, 0, -0.015]
+#     - [0, 0, 0, -0.035]
+#     - [0, 0, 0, 0]
+#   model_config:
+#     config_path: 'models/taxpose/configs'
+#     config_name: 'commands/mfi/waterproof/eval_taxpose_07-24-wp_place.yaml'    

@@ -1,19 +1,19 @@
-source pyorbbecsdk
+# Vision-based Insertion Skill Learning
+
+This repository contains the code for a project sponsored by NIST in 2024. The goal of the project is to develop a vision-based skill learning system for robotic insertion tasks. Details of the project can be found in the [project page](https://cmu-mfi.github.io/rtc/).
+
 ```
-cd camera/orbbec/pyorbbecsdk
-export PYTHONPATH=$PYTHONPATH:$(pwd)/install/lib/ # DON'T forget do this
+git clone --recursive https://github.com/cmu-mfi/rtc_vision_toolbox.git
 ```
 
-1. collect_demo_data.py - collecting raw data/poses. saves it in data/demonstrations folder
-2. prepare_demo_data.ipynb - prepare data for taxpose training. save it to data/train_data
-3. train_residual_flow.py - models/taxpose/scripts/README.md to train. 
-    WANDB account for analytics
-4. test_inference.py - command similar to 3. Config files in models/taxpose/configs/commands/mfi/waterproof
+## Important Notes
 
-error_R_max, error_R_min, error_R_mean = get_degree_angle(
-    T0.inverse().compose(T1).compose(pred_T_action.inverse())
-)
+* `camera` and `robot` folders contain the code for interfacing with the camera and robot, respectively. Currently, they have interface available for a few devices but can be easily extended to other devices. Make sure to follow same class structure as in the existing interfaces.
 
-error_t_max, error_t_min, error_t_mean = get_translation(
-    T0.inverse().compose(T1).compose(pred_T_action.inverse())
-)
+    * Each has `tests` folder to test the interface. Run the tests to make sure the interface is working correctly.
+
+* `demo-example` folder contains training and inference data collected while running the vision system. Rename it to `demo` and use it as a reference to collect your own data.
+
+* `rtc_core` folder contains the core code for the vision system. Avoid changing the code in this folder unless you know what you are doing.
+
+* `scripts` contains scripts to train and test the vision system. Use the scripts as is or modify them to suit your needs.

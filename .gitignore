@@ -4,6 +4,7 @@ orbbec_ros/
 .vscode/
 data/
 test/
+notes.md
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
