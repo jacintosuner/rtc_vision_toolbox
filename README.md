@@ -18,6 +18,7 @@ git clone --recursive https://github.com/cmu-mfi/rtc_vision_toolbox.git
 
 * `scripts` contains scripts to train and test the vision system. Use the scripts as is or modify them to suit your needs.
 
+
 ## Installation Steps
 
 1. **Step 1: Device Interfaces**:
@@ -120,4 +121,3 @@ git clone --recursive https://github.com/cmu-mfi/rtc_vision_toolbox.git
     - Run it a few times to get a sample set of data.
     - Use the `notebooks/visualize_pcd.ipynb` notebook to calculate the error and visualize the point cloud data for the action and anchor objects.
     - If the error is high, then retrain the model by repeating steps 5-6-7.    
-
