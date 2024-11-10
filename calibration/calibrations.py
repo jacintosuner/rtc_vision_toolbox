@@ -47,7 +47,7 @@ def get_camera_marker_tf(camera, marker):
     
     return transforms[0]
         
-def get_robot_camera_tf(camera, robot, marker, method='JOG', num_trials=None, verbose=True, use_depth=True):
+def get_robot_camera_tf(camera, robot, marker, T_eef2marker, method='JOG', num_trials=None, verbose=True, use_depth=True):
     '''
     Collects and solves for the transformation between the robot base and the camera
     
@@ -86,23 +86,6 @@ def get_robot_camera_tf(camera, robot, marker, method='JOG', num_trials=None, ve
     # 3. Solve for the transformation
     # 3.1. Solve the extrinsic calibration between the marker and the base
     
-    """
-    T_eef2marker = np.array([
-                    [1.0, 0.0, 0.0, 0.1016], 
-                    [0.0, 1.0, 0.0, 0.0], 
-                    [0.0, 0.0, 1.0, 0.049], 
-                    [0.0, 0.0, 0.0, 1.0]])
-    """
-
-    T_eef2marker = np.array(
-        [
-            [0.0, 0.0, 1.0, 0.041502],
-            [-1.0, 0.0, 0.0, 0.0],
-            [0.0, -1.0, 0.0, 0.080824],
-            [0.0, 0.0, 0.0, 1.0],
-        ]
-    )
-
     T_base2marker_set = [np.dot(T_base2eef, T_eef2marker) for T_base2eef in T_base2eef_set]
     
     T_base2camera_set = []
