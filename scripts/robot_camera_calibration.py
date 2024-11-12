@@ -8,13 +8,13 @@ from robot.ros_robot.ros_robot import ROSRobot
 
 def robot_camera_calibration():
 
-    camera = ZedRos(camera_node=f'/cam2/zed_cam2', camera_type='zedxm')
+    camera = ZedRos(camera_node=f'/cam2/zed_cam2', camera_type='zedxm', rosmaster_ip='localhost')
 
     print("=====================================")
     print("CAMERA INITIALIZED")
     print("=====================================")
 
-    marker = ArucoMarker(size=0.05)
+    marker = ArucoMarker(type='DICT_4X4_100', size=0.05)
 
     print("=====================================")
     print("MARKER INITIALIZED")

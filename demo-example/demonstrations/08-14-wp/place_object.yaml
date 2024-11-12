@@ -25,7 +25,6 @@ devices:
       type: on_hand
       init_args:
         camera_node: /camera/realsense2_camera
-        # camera_node: /yk_builder/wrist_camera/realsense2_camera
         camera_type: d405
         rosmaster_ip: 192.168.1.2
         rosmaster_port: 9090
@@ -43,6 +42,11 @@ devices:
     class: RobotiqGripper
     init_args:
       port: /dev/ttyUSB0
+    T_ee2gripper: 
+      - [1, 0, 0, 0.0]
+      - [0, 1, 0, 0.0]
+      - [0, 0, 1, 0.212]
+      - [0, 0, 0, 1.0]
 
 training:
   num_demos: ${num_demos}
@@ -51,6 +55,7 @@ training:
     class_idx: 0
     camera: cam2_closeup
     view: gripper_close_up_view
+    viewing_distance: 0.163
     object_bounds:
       min: [-200, -60, 0.0]
       max: [200, 60, 200]
@@ -62,6 +67,7 @@ training:
     class_idx: 1
     camera: cam3_gripper
     view: ih_camera_view
+    viewing_distance: 0.200
     object_bounds:
       min: [-60, -30, 0]
       max: [40, 40, 100]
@@ -71,6 +77,7 @@ training:
       orientation: 5.0
   target:
     view: placement
+    pull_distance: 0.05
   model_config:
     config_path: 'models/taxpose/configs'
     config_name: 'commands/mfi/waterproof/train_taxpose_08-14-wp_place.yaml'
@@ -79,10 +86,12 @@ execution:
   action:
     camera: ${training.action.camera}
     view: ${training.action.view}
+    viewing_distance: ${training.action.viewing_distance}
     object_bounds: ${training.action.object_bounds}
   anchor:
     camera: ${training.anchor.camera}
     view: ${training.anchor.view}
+    viewing_distance: ${training.anchor.viewing_distance}
     object_bounds: ${training.anchor.object_bounds}
   target: ${training.target}
   model_config: 
