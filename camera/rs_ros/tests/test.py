@@ -1,3 +1,5 @@
+import argparse
+
 import cv2
 import numpy as np
 
@@ -14,6 +16,8 @@ def test1(camera):
     print("Infrared intrinsics: \n", infrared_intrinsics)
 
 # TEST2: GET RGB IMAGE. WORKS OK ✓
+
+
 def test2(camera):
     image = camera.get_rgb_image()
     cv2.imwrite("rgb_image.png", image)
@@ -66,24 +70,40 @@ def test5(camera):
 # TEST6: GET IGEV POINT CLOUD. WORKS OK ✓
 def test6(camera):
     print("Getting point cloud using IGEV method")
-    point_cloud = camera.get_point_cloud(method="igev", save_points=True, max_mm = 2000)
+    point_cloud = camera.get_point_cloud(
+        method="igev", save_points=True, max_mm=2000)
     print("Point cloud shape: ", np.asarray(point_cloud.points).shape)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Test script for RsRos class")
+    parser.add_argument("--camera_node", type=str,default="/camera/realsense2_camera", help="Camera node name")
+    parser.add_argument("--rosmaster_ip", type=str,default="localhost", help="ROS master IP")
+    parser.add_argument("--test", type=int, help="Test number (1-6)")
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
 
     print("Testing Realsense ROS class")
 
-    camera = RsRos(camera_node=f"/camera/realsense2_camera", camera_type="d405", rosmaster_ip="192.168.1.2", debug=True)
+    args = parse_args()
 
-    print("Available tests: ")
-    print("1. Get RGB/DEPTH/INFRA intrinsics")
-    print("2. Get RGB image")
-    print("3. Get default depth image")
-    print("4. Get default point cloud")
-    print("5. Get IGEV depth image")
-    print("6. Get IGEV point cloud")
-    test = input("Enter test number (1-6): ")
+    camera = RsRos(camera_node=args.camera_node, camera_type="d405",
+                   rosmaster_ip=args.rosmaster_ip, debug=True)
+
+    if args.test is not None:
+        test = args.test
+    else:
+        print("Suggestion: Use --test option to specify test number")
+        print("Available tests: ")
+        print("1. Get RGB/DEPTH/INFRA intrinsics")
+        print("2. Get RGB image")
+        print("3. Get default depth image")
+        print("4. Get default point cloud")
+        print("5. Get IGEV depth image")
+        print("6. Get IGEV point cloud")
+        test = input("Enter test number (1-6): ")
 
     match test:
         case "1":

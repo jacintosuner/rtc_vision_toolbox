@@ -1,3 +1,5 @@
+import argparse
+
 import cv2
 import numpy as np
 
@@ -69,27 +71,33 @@ def test6(camera):
     print("Point cloud shape: ", np.asarray(point_cloud.points).shape)
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Test script for ZedRos class")
+    parser.add_argument("--camera_node", type=str,default="/cam0/zed_cam0", help="Camera node name")
+    parser.add_argument("--camera_type", type=str,default="zedx", help="Camera type (like zedx, zedxm)")
+    parser.add_argument("--test", type=int, help="Test number (1-6)")
+    return parser.parse_args()
+
 if __name__ == "__main__":
 
     print("Testing ZedRos class")
 
-    cam_id = input("Enter camera id (0/1/2): ")
-    cam_id = int(cam_id)
-    if cam_id == 2:
-        camera = ZedRos(
-            camera_node=f"/cam{cam_id}/zed_cam{cam_id}", camera_type="zedxm"
-        )
-    else:
-        camera = ZedRos(camera_node=f"/cam{cam_id}/zed_cam{cam_id}", camera_type="zedx")
+    args = parse_args()
 
-    print("Available tests: ")
-    print("1. Get RGB/DEPTH intrinsics")
-    print("2. Get RGB image")
-    print("3. Get default depth image")
-    print("4. Get default point cloud")
-    print("5. Get IGEV depth image")
-    print("6. Get IGEV point cloud")
-    test = input("Enter test number (1-6): ")
+    camera = ZedRos(camera_node=args.camera_node, camera_type=args.camera_type)
+
+    if args.test:
+        test = args.test
+    else:
+        print("Suggestion: Use --test option to specify test number")        
+        print("Available tests: ")
+        print("1. Get RGB/DEPTH intrinsics")
+        print("2. Get RGB image")
+        print("3. Get default depth image")
+        print("4. Get default point cloud")
+        print("5. Get IGEV depth image")
+        print("6. Get IGEV point cloud")
+        test = input("Enter test number (1-6): ")
 
     match test:
         case "1":

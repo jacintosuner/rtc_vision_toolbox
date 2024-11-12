@@ -26,7 +26,7 @@ class LearnPlace:
 
     def __init__(self, cfg: DictConfig) -> None:
         self.cfg = cfg
-        self.project_dir = "/home/mfi/repos/rtc_vision_toolbox"
+        self.project_dir = os.path.join(os.path.dirname(__file__), '../../')
 
     def learn(self) -> None:
         torch.set_float32_matmul_precision("high")
@@ -309,8 +309,6 @@ class LearnPlace:
             anchor_pcd.points = o3d.utility.Vector3dVector(
                 np.asarray(anchor_pcd.points)/1000.0)
 
-            np.save(os.path.join('/home/mfi/repos/rtc_vision_toolbox/test', f"demo{i+1}_action.npy"), np.asarray(action_pcd.points))
-
             # transform point cloud data
             anchor_pcd = anchor_pcd.transform(data_list[i]['anchor']['tf'])
             action_pcd = action_pcd.transform(data_list[i]['action']['tf'])
@@ -384,23 +382,16 @@ class LearnPlace:
             
             # target pose
             T_base2targeteef = np.load(os.path.join(teach_pose_dir, f"demo0_placement_pose.npy"))
-            T_ee2target = [[1, 0, 0, 0],
-                           [0, 1, 0, 0],
-                           [0, 0, 1, 0.212],
-                           [0, 0, 0, 1]]        
+            T_ee2target = np.asarray(self.cfg.devices.gripper.T_ee2target)
             T_base2target = np.dot(T_base2targeteef, T_ee2target)
             
             T_base2placeeef = np.load(os.path.join(teach_pose_dir, f"demo{demo}_placement_pose.npy"))
             T_base2place = np.dot(T_base2placeeef, T_ee2target)
-            # breakpoint()
-            # np.save(os.path.join('/home/mfi/repos/rtc_vision_toolbox/test', f"demo{demo}_anchor_og.npy"), np.asarray(anchor_pcd.points))
-
+            
             # transform anchor pcd in target pose frame for easy cropping
             crop_tf = np.dot(np.linalg.inv(T_base2target), T_base2cam)
             anchor_pcd = anchor_pcd.transform(crop_tf)
             
-            # np.save(os.path.join('/home/mfi/repos/rtc_vision_toolbox/test', f"demo{demo}_anchor.npy"), np.asarray(anchor_pcd.points))
-
             # crop_points
             anchor_bounds = cfg.training.anchor.object_bounds
             object_bounds = {

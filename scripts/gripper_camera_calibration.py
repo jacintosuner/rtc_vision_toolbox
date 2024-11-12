@@ -9,41 +9,18 @@ from camera.rs_ros.rs_ros import RsRos
 from camera.zed_ros.zed_ros import ZedRos
 from robot.ros_robot.ros_robot import ROSRobot
 
-cam_key = { 'cam0': 'CL8FC3100RL',
-            'cam1': 'CL8FC3100W3',
-            'cam2': 'CL8FC3100NM'}
-
 def robot_camera_calibration():
 
-    # get input if the specific args are not provided
-
-    print("=====================================")
-    print("Choose Camera params for determining marker pose")
-    print("=====================================")
-    camera_class = input("camera type. \n1:orbbec, \n2:zed_ros\n(1/2): ")
-    camera_id = input("camera id. \n0:cam0, \n1:cam1, \n2:cam2\n(0/1/2): ")
-
-    match camera_class:
-        case "1":
-            scene_camera = OBCamera(serial_no=cam_key[f"cam{camera_id}"])
-        case "2":
-            if camera_id == 2:
-                scene_camera = ZedRos(camera_node=f'/cam{camera_id}/zed_cam{camera_id}', 
-                                camera_type='zedxm')
-            else:
-                scene_camera = ZedRos(camera_node=f'/cam{camera_id}/zed_cam{camera_id}', 
-                                camera_type='zedx')
-        case _:
-            print("Invalid choice")
-            exit()
-
-    inhand_camera = RsRos(camera_node='/camera/realsense2_camera', camera_type='d405')
+    scene_camera = ZedRos(camera_node=f'/cam2/zed_cam2', camera_type='zedxm', rosmaster_ip='localhost')
+    scene_calib_file = '/home/mfi/repos/rtc_vision_toolbox/data/calibration_data/zed/T_base2cam2.npy'
+    
+    inhand_camera = RsRos(camera_node='/camera/realsense2_camera', camera_type='d405', rosmaster_ip='localhost')
 
     print("=====================================")
     print("CAMERAS INITIALIZED")
     print("=====================================")
 
-    marker = ArucoMarker(size=0.1)
+    marker = ArucoMarker(type='DICT_4X4_100', size=0.05)
 
     print("=====================================")
     print("MARKER INITIALIZED")
@@ -61,19 +38,12 @@ def robot_camera_calibration():
     T_scene_camera2marker, ids = marker.get_center_poses(scene_image, scene_camera_matrix, scene_camera_distortion, debug=True)
     T_scene_camera2marker = np.asarray(T_scene_camera2marker[0])
 
-    ## get scene camera to robot transformation
-    if camera_class == '1':
-        file_path = os.path.join(os.path.dirname(__file__), '../data/calibration_data/femto', f'T_base2cam{camera_id}.npy')
-    elif camera_class == '2':
-        file_path = os.path.join(os.path.dirname(__file__), '../data/calibration_data/zed', f'T_base2cam{camera_id}.npy')
-
-    T_base2scene_camera = np.load(file_path)
+    T_base2scene_camera = np.load(scene_calib_file)
     print(f"T_scene_camera2marker:\n {T_scene_camera2marker}")
     print(f"T_base2scene_camera:\n {T_base2scene_camera}")
     T_base2marker = np.dot(T_base2scene_camera, T_scene_camera2marker)
 
     print(f"T_base2marker:\n {T_base2marker}")
-    breakpoint()
 
     print("=====================================")
     print("MARKER IDENTIFIED")

@@ -79,7 +79,7 @@ class TeachPlace:
 
         print("Pulling up action object...")
         pre_placement_pose = np.copy(placement_pose)
-        pre_placement_pose[2, 3] = pre_placement_pose[2,3] + 0.020
+        pre_placement_pose[2, 3] = pre_placement_pose[2,3] + self.config.training.target.pull_distance
         self.devices.robot_move_to_pose(pre_placement_pose)
         
         print("Insert the object in hand.")
@@ -115,7 +115,7 @@ class TeachPlace:
 
             print("Pulling up action object...")
             pre_placement_pose = np.copy(placement_pose)
-            pre_placement_pose[2, 3] = pre_placement_pose[2,3] + 0.025
+            pre_placement_pose[2, 3] = pre_placement_pose[2,3] + self.config.training.target.pull_distance
             self.devices.robot_move_to_pose(pre_placement_pose)
             
             print("####################################################################")
@@ -131,7 +131,7 @@ class TeachPlace:
                 ih_camera_view_pose[2, 3] = placement_pose[2, 3] \
                                             + self.config.training.anchor.viewing_distance \
                                             - 0.212 # 0.212 is the distance from the flange to the end effector tip          
-
+            
             # TODO: Remove this temporary fix
             if self.ih_view_pose is not None:
                 ih_camera_view_pose = self.ih_view_pose
@@ -181,18 +181,11 @@ class TeachPlace:
 
             print(f"Moving to object in hand close up pose...")
             T_base2camera = self.cam_setup[self.config.training.action.camera]["T_base2cam"]
-            distance = 0.375
 
-            if 'viewing_distance' in self.config.training.action.keys():
-                distance = self.config.training.action.viewing_distance \
-                           + 0.212 # 0.212 is the distance from the flange to the end effector tip            
-            
-            T_camera2gripper = np.array([
-                [1,  0,  0, 0],
-                [0, -1,  0, 0],
-                [0,  0, -1, distance],
-                [0,  0,  0, 1]])
-            T_base2gripper = np.dot(T_base2camera, T_camera2gripper)
+            distance = self.cfg.execution.action.viewing_distance
+            T_camera2gripper = np.asarray(self.cfg.devices.gripper.T_camera2gripper)
+            T_eef2gripper = np.asarray(self.devices.gripper.T_ee2gripper)
+            T_base2gripper = (T_base2camera @ T_camera2gripper) @ np.linalg.inv(T_eef2gripper)
             gripper_close_up_pose = T_base2gripper
 
             self.devices.robot_move_to_pose(gripper_close_up_pose)
@@ -230,15 +223,15 @@ class TeachPlace:
             print(f"Moving to placement pose...")
             self.devices.robot_move_to_pose(pre_placement_pose)
 
-            is_good = input("Looks good? Press 'n' to place manually (y/n): ")
+            is_good = input("Is the gripper centered? Press 'n' to place manually (y/n): ")
             if is_good == "n":
-                input("Move robot to placement pose and press Enter to continue...")
+                input("Jog robot to placement pose and press Enter to continue...")
                 self.current_demo -= 1
             elif is_good == "y":
                 self.devices.robot_move_to_pose(placement_pose)
             else:
                 print("Invalid input. Assuming 'n'...")
-                input("Move robot to placement pose and press Enter to continue...")
+                input("Jog robot to placement pose and press Enter to continue...")
             
             self.collect_data("placement")
             

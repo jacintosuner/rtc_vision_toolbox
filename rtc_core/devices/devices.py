@@ -1,4 +1,5 @@
 import argparse
+import logging
 import os
 import time
 
@@ -8,11 +9,30 @@ import numpy as np
 import open3d as o3d
 from omegaconf import DictConfig, OmegaConf
 
-from camera.orbbec.ob_camera import OBCamera
-from camera.rs_ros.rs_ros import RsRos
-from camera.zed_ros.zed_ros import ZedRos
-from robot.robotiq.robotiq_gripper import RobotiqGripper
-from robot.ros_robot.ros_robot import ROSRobot
+try:
+    from camera.orbbec.ob_camera import OBCamera
+except ImportError:
+    logging.warning("OBCamera is not available.")
+
+try:
+    from camera.rs_ros.rs_ros import RsRos
+except ImportError:
+    logging.warning("RsRos is not available.")
+
+try:
+    from camera.zed_ros.zed_ros import ZedRos
+except ImportError:
+    logging.warning("ZedRos is not available.")
+
+try:
+    from robot.robotiq.robotiq_gripper import RobotiqGripper
+except ImportError:
+    logging.warning("RobotiqGripper is not available.")
+    
+try:
+    from robot.ros_robot.ros_robot import ROSRobot
+except ImportError:
+    logging.warning("ROSRobot is not available.")
 
 
 class Devices:

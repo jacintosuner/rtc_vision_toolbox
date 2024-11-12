@@ -72,8 +72,6 @@ if __name__ == "__main__":
     config_name = os.path.basename(config_file)
     
     print(f"Reading configuration file: {config_file}")
-    # print(f"Configuration directory: {config_dir}")
-    # print(f"Configuration name: {config_name}")
     
     hydra.initialize(config_path=config_dir, version_base="1.3")
     config: DictConfig = hydra.compose(config_name)
@@ -82,23 +80,5 @@ if __name__ == "__main__":
 
     place_execute = ExecutePlace(config)
 
-    # pose = place_execute.devices.robot_get_eef_pose()
-    # np.save('start_pose.npy', pose)
-    # print(pose)
-    # breakpoint()
-    
-    # place_execute.collect_data('ih_camera_view')
-    # place_execute.collect_data('check_cal')
-
-    # pose = np.load('/home/mfi/repos/rtc_vision_toolbox/data/demonstrations/07-24-wp/execute_data/0728_1225/predicted_pose.npy')
-    # new_pose = pose + place_execute.cfg.execution.target.bias
-    # breakpoint()
-    # pose = np.dot(new_pose, np.eye(4))
-    # place_execute.devices.robot_move_to_pose(pose)
-    
-    # test_taxpose_wp(place_execute) 
-    # test_taxpose(place_execute)
-    place_execute.validate_execute()
-    # place_execute.execute()
-    # place_execute.loop_execute()
-    
+    place_execute.validate_execute_repeat()
+    # place_execute.execute()    
