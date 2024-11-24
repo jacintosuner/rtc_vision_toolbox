@@ -20,7 +20,7 @@ class ArucoMarker:
     - __estimatePoseSingleMarkers(corners, marker_size, mtx, distortion): Estimates the pose of single Aruco markers.
     """
 
-    def __init__(self, type='DICT_4X4_100', size=0.1):
+    def __init__(self, type='DICT_4X4_100', size=0.1, debug=False):
         """
         Constructor for the ArucoMarker class.
 
@@ -29,6 +29,7 @@ class ArucoMarker:
         - size (float): Size of the marker in meters. Default is 0.1.
         """
         self.__size = size
+        self.debug = debug
         dictionary = aruco.getPredefinedDictionary(getattr(aruco, type))
         parameters = aruco.DetectorParameters()
         self.__detector = aruco.ArucoDetector(dictionary, parameters)
@@ -49,6 +50,13 @@ class ArucoMarker:
         """
         corners, ids, rejected = self.__detect_markers(input_image)
         
+        if debug or self.debug:
+            print("Detected markers: ", ids)
+            output_image = input_image.copy()
+            cv2.aruco.drawDetectedMarkers(output_image, corners, ids)
+            #cv2.drawFrameAxes(output_image, camera_matrix, camera_distortion, rvecs, tvecs, self.__size)
+            cv2.imwrite("debug.png", output_image)
+        
         if(ids is None):
             return None, None
 
@@ -59,11 +67,6 @@ class ArucoMarker:
 
         rvecs, tvecs, _ = self.__estimatePoseSingleMarkers(corners, self.__size, camera_matrix, camera_distortion)
 
-        if debug:
-            output_image = input_image.copy()
-            cv2.aruco.drawDetectedMarkers(output_image, corners, ids)
-            #cv2.drawFrameAxes(output_image, camera_matrix, camera_distortion, rvecs, tvecs, self.__size)
-            cv2.imwrite("debug.png", output_image)
             
         Transforms = []
         

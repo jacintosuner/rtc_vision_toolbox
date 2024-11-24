@@ -161,102 +161,102 @@ def solve_rigid_transformation(T_base2target_set, T_camera2target_set, method="O
         tranforms a point from frame 'b' to frame 'a'
     """
     
-    match method:
-        case "SVD_ALGEBRAIC":   
-            t_camera2target = np.array([T[:3,3] for T in T_camera2target_set])
-            t_base2target = np.array([T[:3,3] for T in T_base2target_set])
-            
-            inpts = t_camera2target
-            outpts = t_base2target
-            
-            assert inpts.shape == outpts.shape
-            inpts, outpts = np.copy(inpts), np.copy(outpts)
-            inpt_mean = inpts.mean(axis=0)
-            outpt_mean = outpts.mean(axis=0)
-            outpts -= outpt_mean
-            inpts -= inpt_mean
 
-            X = inpts.T
-            Y = outpts.T
+    if method == "SVD_ALGEBRAIC":   
+        t_camera2target = np.array([T[:3,3] for T in T_camera2target_set])
+        t_base2target = np.array([T[:3,3] for T in T_base2target_set])
+        
+        inpts = t_camera2target
+        outpts = t_base2target
+        
+        assert inpts.shape == outpts.shape
+        inpts, outpts = np.copy(inpts), np.copy(outpts)
+        inpt_mean = inpts.mean(axis=0)
+        outpt_mean = outpts.mean(axis=0)
+        outpts -= outpt_mean
+        inpts -= inpt_mean
 
-            covariance = np.dot(X, Y.T)
-            U, s, V = np.linalg.svd(covariance)
-            S = np.diag(s)
-            
-            assert np.allclose(covariance, np.dot(U, np.dot(S, V)))
-            V = V.T
-            idmatrix = np.identity(3)
-            idmatrix[2, 2] = np.linalg.det(np.dot(V, U.T))
-            R = np.dot(np.dot(V, idmatrix), U.T)
-            t = outpt_mean.T - np.dot(R, inpt_mean)
-            T = np.eye(4)
-            T[:3,:3] = R
-            T[:3,3] = t
-            return T
-        
-        case "ONE_SAMPLE_ESTIMATE":
-            T_base2camera_set = []
-            errors = []
-            for i in range(len(T_base2target_set)):
-                T_base2target = T_base2target_set[i]
-                T_camera2target = T_camera2target_set[i]
-                T_base2camera = np.dot(T_base2target, np.linalg.inv(T_camera2target))
-                T_base2camera_set.append(T_base2camera)
-                error, _ = calculate_reprojection_error(T_base2target_set, T_camera2target_set, T_base2camera)
-                errors.append(error)
+        X = inpts.T
+        Y = outpts.T
 
-            min_error_index = np.argmin(errors)
-            T_base2camera = T_base2camera_set[min_error_index]
-            return T_base2camera
+        covariance = np.dot(X, Y.T)
+        U, s, V = np.linalg.svd(covariance)
+        S = np.diag(s)
         
-        case "CALIB_HAND_EYE_TSAI":
-            T_target2base_set = [np.linalg.inv(T) for T in T_base2target_set]
-            R_target2base = [T[:3,:3] for T in T_target2base_set]
-            t_target2base = [T[:3,3] for T in T_target2base_set]
-            
-            R_camera2target = [T[:3,:3] for T in T_camera2target_set]
-            t_camera2target = [T[:3,3] for T in T_camera2target_set]
-            R_camera2base, t_base2camera = cv2.calibrateHandEye(R_target2base, t_target2base, 
-                                                                R_camera2target, t_camera2target,  
-                                                                cv2.CALIB_HAND_EYE_TSAI)
-            T_base2camera = np.eye(4)
-            T_base2camera[:3,:3] = R_camera2base
-            T_base2camera[:3,3] = np.squeeze(t_base2camera)
-            return T_base2camera
+        assert np.allclose(covariance, np.dot(U, np.dot(S, V)))
+        V = V.T
+        idmatrix = np.identity(3)
+        idmatrix[2, 2] = np.linalg.det(np.dot(V, U.T))
+        R = np.dot(np.dot(V, idmatrix), U.T)
+        t = outpt_mean.T - np.dot(R, inpt_mean)
+        T = np.eye(4)
+        T[:3,:3] = R
+        T[:3,3] = t
+        return T
+    
+    elif method == "ONE_SAMPLE_ESTIMATE":
+        T_base2camera_set = []
+        errors = []
+        for i in range(len(T_base2target_set)):
+            T_base2target = T_base2target_set[i]
+            T_camera2target = T_camera2target_set[i]
+            T_base2camera = np.dot(T_base2target, np.linalg.inv(T_camera2target))
+            T_base2camera_set.append(T_base2camera)
+            error, _ = calculate_reprojection_error(T_base2target_set, T_camera2target_set, T_base2camera)
+            errors.append(error)
+
+        min_error_index = np.argmin(errors)
+        T_base2camera = T_base2camera_set[min_error_index]
+        return T_base2camera
+    
+    elif method ==  "CALIB_HAND_EYE_TSAI":
+        T_target2base_set = [np.linalg.inv(T) for T in T_base2target_set]
+        R_target2base = [T[:3,:3] for T in T_target2base_set]
+        t_target2base = [T[:3,3] for T in T_target2base_set]
         
-        case "CALIB_HAND_EYE_ANDREFF":
-            T_target2base_set = [np.linalg.inv(T) for T in T_base2target_set]
-            R_target2base = [T[:3,:3] for T in T_target2base_set]
-            t_target2base = [T[:3,3] for T in T_target2base_set]
-            
-            R_camera2target = [T[:3,:3] for T in T_camera2target_set]
-            t_camera2target = [T[:3,3] for T in T_camera2target_set]
-            R_camera2base, t_base2camera = cv2.calibrateHandEye(R_target2base, t_target2base, 
-                                                                R_camera2target, t_camera2target,  
-                                                                cv2.CALIB_HAND_EYE_ANDREFF)
-            T_base2camera = np.eye(4)
-            T_base2camera[:3,:3] = R_camera2base
-            T_base2camera[:3,3] = np.squeeze(t_base2camera)
-            return T_base2camera
+        R_camera2target = [T[:3,:3] for T in T_camera2target_set]
+        t_camera2target = [T[:3,3] for T in T_camera2target_set]
+        R_camera2base, t_base2camera = cv2.calibrateHandEye(R_target2base, t_target2base, 
+                                                            R_camera2target, t_camera2target,  
+                                                            cv2.CALIB_HAND_EYE_TSAI)
+        T_base2camera = np.eye(4)
+        T_base2camera[:3,:3] = R_camera2base
+        T_base2camera[:3,3] = np.squeeze(t_base2camera)
+        return T_base2camera
+    
+    elif method == "CALIB_HAND_EYE_ANDREFF":
+        T_target2base_set = [np.linalg.inv(T) for T in T_base2target_set]
+        R_target2base = [T[:3,:3] for T in T_target2base_set]
+        t_target2base = [T[:3,3] for T in T_target2base_set]
         
-        case "CALIB_HAND_EYE_PARK":
-            T_target2base_set = [np.linalg.inv(T) for T in T_base2target_set]
-            R_target2base = [T[:3,:3] for T in T_target2base_set]
-            t_target2base = [T[:3,3] for T in T_target2base_set]
+        R_camera2target = [T[:3,:3] for T in T_camera2target_set]
+        t_camera2target = [T[:3,3] for T in T_camera2target_set]
+        R_camera2base, t_base2camera = cv2.calibrateHandEye(R_target2base, t_target2base, 
+                                                            R_camera2target, t_camera2target,  
+                                                            cv2.CALIB_HAND_EYE_ANDREFF)
+        T_base2camera = np.eye(4)
+        T_base2camera[:3,:3] = R_camera2base
+        T_base2camera[:3,3] = np.squeeze(t_base2camera)
+        return T_base2camera
+    
+    elif method == "CALIB_HAND_EYE_PARK":
+        T_target2base_set = [np.linalg.inv(T) for T in T_base2target_set]
+        R_target2base = [T[:3,:3] for T in T_target2base_set]
+        t_target2base = [T[:3,3] for T in T_target2base_set]
+        
+        R_camera2target = [T[:3,:3] for T in T_camera2target_set]
+        t_camera2target = [T[:3,3] for T in T_camera2target_set]
+        R_camera2base, t_base2camera = cv2.calibrateHandEye(R_target2base, t_target2base, 
+                                                            R_camera2target, t_camera2target,  
+                                                            cv2.CALIB_HAND_EYE_PARK)
+        T_base2camera = np.eye(4)
+        T_base2camera[:3,:3] = R_camera2base
+        T_base2camera[:3,3] = np.squeeze(t_base2camera)
+        return T_base2camera        
             
-            R_camera2target = [T[:3,:3] for T in T_camera2target_set]
-            t_camera2target = [T[:3,3] for T in T_camera2target_set]
-            R_camera2base, t_base2camera = cv2.calibrateHandEye(R_target2base, t_target2base, 
-                                                                R_camera2target, t_camera2target,  
-                                                                cv2.CALIB_HAND_EYE_PARK)
-            T_base2camera = np.eye(4)
-            T_base2camera[:3,:3] = R_camera2base
-            T_base2camera[:3,3] = np.squeeze(t_base2camera)
-            return T_base2camera        
-                
-        case _:
-            print("Invalid method. Aborting...")
-            return None
+    else:
+        print("Invalid method. Aborting...")
+        return None
 
 def collect_data(camera, robot, marker, method='JOG', num_trials=None, verbose=True, use_depth=True):
     '''
@@ -298,26 +298,25 @@ def collect_data(camera, robot, marker, method='JOG', num_trials=None, verbose=T
 
     for i in range(num_trials):        
         retry = 'y'
-        while retry=='y': 
+        while retry=='y':
         
-            match method:
+            if method == 'JOG':
                 # 2.1. Move the robot with controller and collect data
-                case 'JOG':
-                    good_to_go = 'n'
-                    while good_to_go != 'y':
-                        if i == num_trials - 1:
-                            good_to_go = 'y'
-                        else:
-                            good_to_go = input("Jog the robot. Done? (y/n): ")
+                good_to_go = 'n'
+                while good_to_go != 'y':
+                    if i == num_trials - 1:
+                        good_to_go = 'y'
+                    else:
+                        good_to_go = input("Jog the robot. Done? (y/n): ")
                             
                         
-                # 2.1. Move the robot and collect data
-                case 'PLAY':
-                    random_delta_pos = np.random.uniform(-0.05, 0.05, size=(3,))
-                    # random_delta_quart = np.random.uniform(-0.3, 0.3, size=(4,))
-                    random_delta_quart = np.random.uniform(-0.1, 0.1, size=(4,))                    
-                    robot_pose = robot.move_to_pose(position = home_pos + random_delta_pos, 
-                                                    orientation = home_quart + random_delta_quart)      
+            # 2.1. Move the robot and collect data
+            if method == 'PLAY':
+                random_delta_pos = np.random.uniform(-0.05, 0.05, size=(3,))
+                # random_delta_quart = np.random.uniform(-0.3, 0.3, size=(4,))
+                random_delta_quart = np.random.uniform(-0.2, 0.2, size=(4,))                    
+                robot_pose = robot.move_to_pose(position = home_pos + random_delta_pos, 
+                                                orientation = home_quart + random_delta_quart)      
             if robot_pose is not None:
                 # 2.2. Collect data from camera
                 image = camera.get_rgb_image()
@@ -405,26 +404,25 @@ def collect_data(camera, robot, marker, method='JOG', num_trials=None, verbose=T
     
     # Registration
     T_result = None
-    match method:
-        case "ICP_P2Point":
-            reg_p2p = o3d.pipelines.registration.registration_icp(
-                source_pcd, target_pcd, threshold, T_init,
-                o3d.pipelines.registration.TransformationEstimationPointToPoint())
-            T_result = reg_p2p.transformation
-            if verbose:
-                print(reg_p2p)
+    if method == "ICP_P2Point":
+        reg_p2p = o3d.pipelines.registration.registration_icp(
+            source_pcd, target_pcd, threshold, T_init,
+            o3d.pipelines.registration.TransformationEstimationPointToPoint())
+        T_result = reg_p2p.transformation
+        if verbose:
+            print(reg_p2p)
                 
-        case "ICP_P2Plane":
-            reg_p2p = o3d.pipelines.registration.registration_icp(
-                source_pcd, target_pcd, threshold, T_init,
-                o3d.pipelines.registration.TransformationEstimationPointToPlane())
-            T_result = reg_p2p.transformation
-            if verbose:
-                print(reg_p2p)
+    if method == "ICP_P2Plane":
+        reg_p2p = o3d.pipelines.registration.registration_icp(
+            source_pcd, target_pcd, threshold, T_init,
+            o3d.pipelines.registration.TransformationEstimationPointToPlane())
+        T_result = reg_p2p.transformation
+        if verbose:
+            print(reg_p2p)
                 
-        case _:
-            print("Invalid method. Aborting...")
-            return None
+    else:
+        print("Invalid method. Aborting...")
+        return None
         
     # Final Evaluation
     evaluation = o3d.pipelines.registration.evaluate_registration(
