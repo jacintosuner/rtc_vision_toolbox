@@ -360,3 +360,9 @@ class FrankaRobot:
             [0, 0, 1]
         ])
         return rz @ ry @ rx
+    
+
+if __name__ == "__main__":
+    robot = FrankaRobot()
+    print("Robot initialized")
+    print(robot.get_eef_pose())

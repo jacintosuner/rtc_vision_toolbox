@@ -14,7 +14,7 @@ def robot_camera_calibration():
     print("=====================================")
 
     # marker = ArucoMarker(type='DICT_4X4_100', size=0.05)
-    marker = ArucoMarker(type='DICT_ARUCO_ORIGINAL', size=0.048, debug=True)
+    marker = ArucoMarker(type='DICT_ARUCO_ORIGINAL', size=0.0489, debug=True)
 
     print("=====================================")
     print("MARKER INITIALIZED")
